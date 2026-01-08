@@ -43,9 +43,9 @@ export default function Signup() {
     } else {
       toast({
         title: "Compte créé !",
-        description: "Bienvenue sur Well, votre compte est prêt.",
+        description: "Bienvenue sur Well, configurons votre espace.",
       });
-      navigate("/dashboard");
+      navigate("/onboarding");
     }
 
     setIsLoading(false);

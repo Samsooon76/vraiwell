@@ -15,17 +15,17 @@ export default {
     extend: {
       fontFamily: {
         sans: ['Inter', 'system-ui', 'sans-serif'],
-        display: ['Manrope', 'system-ui', 'sans-serif'],
+        display: ['Plus Jakarta Sans', 'system-ui', 'sans-serif'],
       },
       fontSize: {
-        'display-xl': ['3rem', { lineHeight: '1.1', letterSpacing: '-0.02em', fontWeight: '800' }],
-        'display-lg': ['2.5rem', { lineHeight: '1.2', letterSpacing: '-0.02em', fontWeight: '700' }],
-        'display-md': ['2rem', { lineHeight: '1.25', letterSpacing: '-0.01em', fontWeight: '700' }],
-        'display-sm': ['1.5rem', { lineHeight: '1.3', letterSpacing: '-0.01em', fontWeight: '600' }],
-        'body-lg': ['1.125rem', { lineHeight: '1.6' }],
-        'body-md': ['1rem', { lineHeight: '1.6' }],
-        'body-sm': ['0.875rem', { lineHeight: '1.5' }],
-        'caption': ['0.75rem', { lineHeight: '1.4' }],
+        'display-xl': ['2.75rem', { lineHeight: '1.1', letterSpacing: '-0.03em', fontWeight: '600' }],
+        'display-lg': ['2.25rem', { lineHeight: '1.15', letterSpacing: '-0.02em', fontWeight: '600' }],
+        'display-md': ['1.75rem', { lineHeight: '1.2', letterSpacing: '-0.02em', fontWeight: '600' }],
+        'display-sm': ['1.25rem', { lineHeight: '1.3', letterSpacing: '-0.01em', fontWeight: '500' }],
+        'body-lg': ['1.0625rem', { lineHeight: '1.65', fontWeight: '400' }],
+        'body-md': ['0.9375rem', { lineHeight: '1.6', fontWeight: '400' }],
+        'body-sm': ['0.8125rem', { lineHeight: '1.5', fontWeight: '400' }],
+        'caption': ['0.6875rem', { lineHeight: '1.4', fontWeight: '500', letterSpacing: '0.02em' }],
       },
       colors: {
         border: "hsl(var(--border))",

@@ -64,12 +64,12 @@ export default function Landing() {
             </div>
             <span className="font-display text-xl font-bold text-foreground">Well</span>
           </div>
-          <div className="flex items-center gap-4">
-            <Link to="/dashboard">
-              <Button variant="ghost">Connexion</Button>
+          <div className="flex items-center gap-3">
+            <Link to="/login">
+              <Button variant="ghost" size="sm">Connexion</Button>
             </Link>
-            <Link to="/dashboard">
-              <Button variant="hero">
+            <Link to="/signup">
+              <Button size="sm">
                 Démarrer gratuitement
                 <ArrowRight className="h-4 w-4" />
               </Button>
@@ -112,13 +112,13 @@ export default function Landing() {
             transition={{ delay: 0.4 }}
             className="flex flex-col sm:flex-row items-center justify-center gap-4"
           >
-            <Link to="/dashboard">
-              <Button variant="hero" size="xl">
+            <Link to="/signup">
+              <Button size="lg">
                 Essayer gratuitement
                 <ArrowRight className="h-5 w-5" />
               </Button>
             </Link>
-            <Button variant="outline" size="xl">
+            <Button variant="outline" size="lg">
               Voir une démo
             </Button>
           </motion.div>
@@ -199,10 +199,10 @@ export default function Landing() {
               <p className="text-lg text-primary-foreground/80 mb-8 max-w-xl mx-auto">
                 Rejoignez les équipes qui économisent des heures chaque semaine avec Well.
               </p>
-              <Link to="/dashboard">
+              <Link to="/signup">
                 <Button 
-                  size="xl" 
-                  className="bg-white text-primary hover:bg-white/90 shadow-xl"
+                  size="lg" 
+                  className="bg-card text-primary hover:bg-card/90"
                 >
                   Commencer gratuitement
                   <ArrowRight className="h-5 w-5" />
