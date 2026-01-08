@@ -1,11 +1,13 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { useNavigate } from "react-router-dom";
-import { Check, ArrowRight, Building2, Users, Mail } from "lucide-react";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { Check, ArrowRight, Building2, Users, Mail, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
+import { useGoogleAuth } from "@/hooks/useGoogleAuth";
+import { toast } from "sonner";
 
 const steps = [
   { id: 1, name: "Organisation", description: "Informations sur votre entreprise" },
@@ -15,11 +17,43 @@ const steps = [
 
 export default function Onboarding() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [currentStep, setCurrentStep] = useState(1);
   const [companyName, setCompanyName] = useState("");
   const [companySize, setCompanySize] = useState("");
   const [connectedIntegrations, setConnectedIntegrations] = useState<string[]>([]);
   const [inviteEmails, setInviteEmails] = useState("");
+
+  const { 
+    isConnecting, 
+    isLoadingUsers, 
+    googleUsers, 
+    connectGoogle, 
+    fetchGoogleUsers,
+    checkGoogleConnection 
+  } = useGoogleAuth();
+
+  // Handle OAuth redirect
+  useEffect(() => {
+    const stepParam = searchParams.get("step");
+    const connectedParam = searchParams.get("connected");
+
+    if (stepParam) {
+      setCurrentStep(parseInt(stepParam));
+    }
+
+    if (connectedParam === "google") {
+      checkGoogleConnection().then((isConnected) => {
+        if (isConnected) {
+          setConnectedIntegrations((prev) => 
+            prev.includes("Google Workspace") ? prev : [...prev, "Google Workspace"]
+          );
+          toast.success("Google Workspace connecté avec succès !");
+          fetchGoogleUsers();
+        }
+      });
+    }
+  }, [searchParams]);
 
   const progress = (currentStep / steps.length) * 100;
 
@@ -39,10 +73,20 @@ export default function Onboarding() {
     }
   };
 
-  const toggleIntegration = (name: string) => {
-    setConnectedIntegrations((prev) =>
-      prev.includes(name) ? prev.filter((i) => i !== name) : [...prev, name]
-    );
+  const handleIntegrationClick = async (name: string) => {
+    if (name === "Google Workspace") {
+      if (connectedIntegrations.includes(name)) {
+        // Already connected - fetch users
+        fetchGoogleUsers();
+      } else {
+        // Connect Google
+        await connectGoogle();
+      }
+    } else if (name === "Microsoft 365") {
+      toast.info("L'intégration Microsoft 365 sera bientôt disponible.");
+    } else if (name === "Slack") {
+      toast.info("L'intégration Slack sera bientôt disponible.");
+    }
   };
 
   const integrations = [
@@ -106,7 +150,7 @@ export default function Onboarding() {
         <div className="flex-1">
           <h2 className="text-sm font-medium text-muted-foreground mb-6">Configuration</h2>
           <nav className="space-y-2">
-            {steps.map((step, index) => (
+            {steps.map((step) => (
               <div
                 key={step.id}
                 className={`flex items-center gap-3 p-3 rounded-lg transition-colors ${
@@ -233,31 +277,77 @@ export default function Onboarding() {
                   </div>
 
                   <div className="space-y-3">
-                    {integrations.map((integration) => (
-                      <button
-                        key={integration.name}
-                        onClick={() => toggleIntegration(integration.name)}
-                        className={`w-full flex items-center gap-4 p-4 rounded-xl border text-left transition-all ${
-                          connectedIntegrations.includes(integration.name)
-                            ? "border-primary bg-accent"
-                            : "border-border hover:border-primary/50 hover:bg-accent/50"
-                        }`}
-                      >
-                        <div className="flex-shrink-0">{integration.icon}</div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium text-foreground">{integration.name}</p>
-                          <p className="text-xs text-muted-foreground">{integration.description}</p>
-                        </div>
-                        {connectedIntegrations.includes(integration.name) ? (
-                          <div className="flex h-6 w-6 items-center justify-center rounded-full bg-primary text-primary-foreground">
-                            <Check className="h-3.5 w-3.5" />
+                    {integrations.map((integration) => {
+                      const isConnected = connectedIntegrations.includes(integration.name);
+                      const isGoogle = integration.name === "Google Workspace";
+                      const isLoading = isGoogle && (isConnecting || isLoadingUsers);
+
+                      return (
+                        <button
+                          key={integration.name}
+                          onClick={() => handleIntegrationClick(integration.name)}
+                          disabled={isLoading}
+                          className={`w-full flex items-center gap-4 p-4 rounded-xl border text-left transition-all disabled:opacity-50 ${
+                            isConnected
+                              ? "border-primary bg-accent"
+                              : "border-border hover:border-primary/50 hover:bg-accent/50"
+                          }`}
+                        >
+                          <div className="flex-shrink-0">{integration.icon}</div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium text-foreground">{integration.name}</p>
+                            <p className="text-xs text-muted-foreground">{integration.description}</p>
                           </div>
-                        ) : (
-                          <span className="text-xs text-muted-foreground">Connecter</span>
-                        )}
-                      </button>
-                    ))}
+                          {isLoading ? (
+                            <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                          ) : isConnected ? (
+                            <div className="flex h-6 w-6 items-center justify-center rounded-full bg-primary text-primary-foreground">
+                              <Check className="h-3.5 w-3.5" />
+                            </div>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">Connecter</span>
+                          )}
+                        </button>
+                      );
+                    })}
                   </div>
+
+                  {/* Show connected Google users */}
+                  {googleUsers.length > 0 && (
+                    <div className="mt-6 p-4 rounded-xl bg-muted/50 border border-border">
+                      <p className="text-sm font-medium text-foreground mb-3">
+                        Utilisateurs Google détectés
+                      </p>
+                      <div className="space-y-2">
+                        {googleUsers.map((user) => (
+                          <div key={user.id} className="flex items-center gap-3">
+                            {user.avatar ? (
+                              <img
+                                src={user.avatar}
+                                alt={user.name}
+                                className="h-8 w-8 rounded-full"
+                              />
+                            ) : (
+                              <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center">
+                                <span className="text-xs font-medium text-primary">
+                                  {user.name.charAt(0)}
+                                </span>
+                              </div>
+                            )}
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-medium text-foreground truncate">
+                                {user.name}
+                                {user.isCurrentUser && (
+                                  <span className="ml-2 text-xs text-muted-foreground">(vous)</span>
+                                )}
+                              </p>
+                              <p className="text-xs text-muted-foreground truncate">{user.email}</p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
 
                   <p className="mt-4 text-xs text-muted-foreground text-center">
                     Vous pourrez ajouter d'autres intégrations plus tard dans les paramètres.
