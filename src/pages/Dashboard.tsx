@@ -9,8 +9,7 @@ import { Input } from "@/components/ui/input";
 import { RequestToolModal } from "@/components/modals/RequestToolModal";
 import { ToolDetailsModal } from "@/components/modals/ToolDetailsModal";
 import { AccessRequestModal } from "@/components/modals/AccessRequestModal";
-import { useGoogleAuth } from "@/hooks/useGoogleAuth";
-import { useMicrosoftAuth } from "@/hooks/useMicrosoftAuth";
+import { supabase } from "@/integrations/supabase/client";
 
 const categories = ["Tous", "CRM", "Communication", "Productivité", "Développement", "Design", "RH"];
 
@@ -22,46 +21,61 @@ export default function Dashboard() {
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [accessRequestOpen, setAccessRequestOpen] = useState(false);
   const [tools, setTools] = useState<Tool[]>([]);
-  
-  const { checkGoogleConnection } = useGoogleAuth();
-  const { checkMicrosoftConnection } = useMicrosoftAuth();
+  const [isLoading, setIsLoading] = useState(true);
 
   // Check connected integrations and add them to tools
   useEffect(() => {
     const loadConnectedTools = async () => {
+      setIsLoading(true);
       const connectedTools: Tool[] = [];
       
-      const isGoogleConnected = await checkGoogleConnection();
-      if (isGoogleConnected) {
-        connectedTools.push({
-          id: "google-workspace",
-          name: "Google Workspace",
-          description: "Suite bureautique cloud - Gmail, Drive, Calendar, Meet",
-          icon: "google",
-          category: "Productivité",
-          status: "active",
-          monthlySpend: 0,
-          seats: 1,
-          usedSeats: 1,
-        });
-      }
-      
-      const isMicrosoftConnected = await checkMicrosoftConnection();
-      if (isMicrosoftConnected) {
-        connectedTools.push({
-          id: "microsoft-365",
-          name: "Microsoft 365",
-          description: "Suite Microsoft - Outlook, OneDrive, Teams, Office",
-          icon: "microsoft",
-          category: "Productivité",
-          status: "active",
-          monthlySpend: 0,
-          seats: 1,
-          usedSeats: 1,
-        });
+      try {
+        // Check Google connection directly
+        const { data: { user } } = await supabase.auth.getUser();
+        
+        if (user) {
+          const googleIdentity = user.identities?.find(
+            (identity) => identity.provider === "google"
+          );
+          
+          if (googleIdentity) {
+            connectedTools.push({
+              id: "google-workspace",
+              name: "Google Workspace",
+              description: "Suite bureautique cloud - Gmail, Drive, Calendar, Meet",
+              icon: "google",
+              category: "Productivité",
+              status: "active",
+              monthlySpend: 0,
+              seats: 1,
+              usedSeats: 1,
+            });
+          }
+          
+          const microsoftIdentity = user.identities?.find(
+            (identity) => identity.provider === "azure"
+          );
+          
+          if (microsoftIdentity) {
+            connectedTools.push({
+              id: "microsoft-365",
+              name: "Microsoft 365",
+              description: "Suite Microsoft - Outlook, OneDrive, Teams, Office",
+              icon: "microsoft",
+              category: "Productivité",
+              status: "active",
+              monthlySpend: 0,
+              seats: 1,
+              usedSeats: 1,
+            });
+          }
+        }
+      } catch (error) {
+        console.error("Error loading connected tools:", error);
       }
       
       setTools(connectedTools);
+      setIsLoading(false);
     };
     
     loadConnectedTools();
