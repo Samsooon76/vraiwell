@@ -1,5 +1,5 @@
 import { motion } from "framer-motion";
-import { Link, useLocation } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { 
   LayoutGrid, 
   FileText, 
@@ -10,6 +10,7 @@ import {
   Workflow,
   LogOut
 } from "lucide-react";
+import { useAuth } from "@/hooks/useAuth";
 import { cn } from "@/lib/utils";
 
 const navigation = [
@@ -27,6 +28,13 @@ const secondaryNav = [
 
 export function Sidebar() {
   const location = useLocation();
+  const navigate = useNavigate();
+  const { user, signOut } = useAuth();
+
+  const handleSignOut = async () => {
+    await signOut();
+    navigate("/");
+  };
 
   return (
     <motion.aside
