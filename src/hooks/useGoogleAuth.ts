@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 
-interface GoogleUser {
+export interface GoogleUser {
   id: string;
   email: string;
   name: string;
