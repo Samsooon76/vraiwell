@@ -27,15 +27,15 @@ interface Integration {
   actions?: number;
 }
 
-const mockIntegrations: Integration[] = [
+const defaultIntegrations: Integration[] = [
   { id: "1", name: "Google Workspace", description: "Suite bureautique cloud", category: "Productivité", status: "available" },
-  { id: "2", name: "Slack", description: "Communication d'équipe", category: "Communication", status: "connected", lastSync: "Il y a 2 min", actions: 6 },
-  { id: "3", name: "HubSpot", description: "CRM et marketing", category: "CRM", status: "connected", lastSync: "Il y a 15 min", actions: 12 },
-  { id: "4", name: "Notion", description: "Documentation collaborative", category: "Productivité", status: "connected", lastSync: "Il y a 8 min", actions: 5 },
-  { id: "5", name: "Payfit", description: "Gestion de la paie", category: "RH", status: "connected", lastSync: "Il y a 1h", actions: 4 },
+  { id: "2", name: "Slack", description: "Communication d'équipe", category: "Communication", status: "available" },
+  { id: "3", name: "HubSpot", description: "CRM et marketing", category: "CRM", status: "available" },
+  { id: "4", name: "Notion", description: "Documentation collaborative", category: "Productivité", status: "available" },
+  { id: "5", name: "Payfit", description: "Gestion de la paie", category: "RH", status: "available" },
   { id: "6", name: "GitHub", description: "Hébergement de code", category: "Développement", status: "available" },
   { id: "7", name: "Figma", description: "Design collaboratif", category: "Design", status: "available" },
-  { id: "8", name: "Salesforce", description: "CRM enterprise", category: "CRM", status: "error", lastSync: "Erreur de connexion" },
+  { id: "8", name: "Salesforce", description: "CRM enterprise", category: "CRM", status: "available" },
   { id: "9", name: "Microsoft 365", description: "Suite Microsoft", category: "Productivité", status: "available" },
   { id: "10", name: "Deel", description: "Paie internationale", category: "RH", status: "available" },
   { id: "11", name: "Asana", description: "Gestion de projet", category: "Productivité", status: "available" },
@@ -47,7 +47,7 @@ type FilterStatus = "all" | "connected" | "available";
 export default function Integrations() {
   const [filter, setFilter] = useState<FilterStatus>("all");
   const [addIntegrationOpen, setAddIntegrationOpen] = useState(false);
-  const [integrations, setIntegrations] = useState<Integration[]>(mockIntegrations);
+  const [integrations, setIntegrations] = useState<Integration[]>(defaultIntegrations);
   
   const { connectGoogle, isConnecting, checkGoogleConnection } = useGoogleAuth();
 
@@ -115,7 +115,7 @@ export default function Integrations() {
           >
             Toutes
             <span className="rounded-full bg-background/20 px-2 py-0.5 text-xs">
-              {mockIntegrations.length}
+              {integrations.length}
             </span>
           </button>
           <button
