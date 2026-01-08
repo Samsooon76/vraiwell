@@ -12,6 +12,7 @@ import {
   RefreshCw,
   AlertCircle
 } from "lucide-react";
+import { AddIntegrationModal } from "@/components/modals/AddIntegrationModal";
 
 interface Integration {
   id: string;
@@ -42,6 +43,7 @@ type FilterStatus = "all" | "connected" | "available";
 
 export default function Integrations() {
   const [filter, setFilter] = useState<FilterStatus>("all");
+  const [addIntegrationOpen, setAddIntegrationOpen] = useState(false);
 
   const filteredIntegrations = mockIntegrations.filter((integration) =>
     filter === "all" ? true : 
@@ -186,7 +188,7 @@ export default function Integrations() {
                   </>
                 )}
                 {integration.status === "available" && (
-                  <Button variant="default" size="sm" className="flex-1">
+                  <Button variant="default" size="sm" className="flex-1" onClick={() => setAddIntegrationOpen(true)}>
                     <Plus className="h-4 w-4" />
                     Connecter
                   </Button>
@@ -215,12 +217,14 @@ export default function Integrations() {
           <p className="text-sm text-muted-foreground mb-4">
             Demandez une intégration personnalisée et nous la développerons pour vous.
           </p>
-          <Button variant="outline">
+          <Button variant="outline" onClick={() => setAddIntegrationOpen(true)}>
             <Plus className="h-4 w-4" />
             Demander une intégration
           </Button>
         </motion.div>
       </div>
+      
+      <AddIntegrationModal open={addIntegrationOpen} onOpenChange={setAddIntegrationOpen} />
     </DashboardLayout>
   );
 }

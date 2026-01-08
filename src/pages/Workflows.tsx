@@ -21,6 +21,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { AddWorkflowModal } from "@/components/modals/AddWorkflowModal";
 
 interface Workflow {
   id: string;
@@ -87,6 +88,7 @@ const typeConfig = {
 
 export default function Workflows() {
   const [workflows] = useState(mockWorkflows);
+  const [addWorkflowOpen, setAddWorkflowOpen] = useState(false);
 
   const activeCount = workflows.filter(w => w.isActive).length;
   const totalRuns = workflows.reduce((sum, w) => sum + w.runsCount, 0);
@@ -106,7 +108,7 @@ export default function Workflows() {
               Automatisez l'onboarding et l'offboarding de vos équipes
             </p>
           </div>
-          <Button variant="hero" size="lg">
+          <Button variant="hero" size="lg" onClick={() => setAddWorkflowOpen(true)}>
             <Plus className="h-4 w-4" />
             Nouveau workflow
           </Button>
@@ -267,12 +269,14 @@ export default function Workflows() {
           <p className="text-sm text-muted-foreground mb-4 max-w-md mx-auto">
             Combinez plusieurs outils pour automatiser des tâches complexes comme l'onboarding d'un nouveau collaborateur.
           </p>
-          <Button variant="hero">
+          <Button variant="hero" onClick={() => setAddWorkflowOpen(true)}>
             <Plus className="h-4 w-4" />
             Créer un workflow
           </Button>
         </motion.div>
       </div>
+      
+      <AddWorkflowModal open={addWorkflowOpen} onOpenChange={setAddWorkflowOpen} />
     </DashboardLayout>
   );
 }
