@@ -6,6 +6,9 @@ import { ToolCard, Tool } from "@/components/tools/ToolCard";
 import { StatsCard } from "@/components/dashboard/StatsCard";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { RequestToolModal } from "@/components/modals/RequestToolModal";
+import { ToolDetailsModal } from "@/components/modals/ToolDetailsModal";
+import { AccessRequestModal } from "@/components/modals/AccessRequestModal";
 
 // Mock data
 const mockTools: Tool[] = [
@@ -92,6 +95,10 @@ const categories = ["Tous", "CRM", "Communication", "Productivité", "Développe
 export default function Dashboard() {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("Tous");
+  const [requestToolOpen, setRequestToolOpen] = useState(false);
+  const [selectedTool, setSelectedTool] = useState<Tool | null>(null);
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [accessRequestOpen, setAccessRequestOpen] = useState(false);
 
   const filteredTools = mockTools.filter((tool) => {
     const matchesSearch = tool.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -177,7 +184,7 @@ export default function Dashboard() {
               Filtres
             </Button>
           </div>
-          <Button variant="hero" size="lg">
+          <Button variant="hero" size="lg" onClick={() => setRequestToolOpen(true)}>
             <Plus className="h-4 w-4" />
             Demander un outil
           </Button>
@@ -219,8 +226,20 @@ export default function Dashboard() {
             >
               <ToolCard
                 tool={tool}
-                onRequestAccess={(id) => console.log("Request access:", id)}
-                onOpenTool={(id) => console.log("Open tool:", id)}
+                onRequestAccess={(id) => {
+                  const t = mockTools.find(t => t.id === id);
+                  if (t) {
+                    setSelectedTool(t);
+                    setAccessRequestOpen(true);
+                  }
+                }}
+                onOpenTool={(id) => {
+                  const t = mockTools.find(t => t.id === id);
+                  if (t) {
+                    setSelectedTool(t);
+                    setDetailsOpen(true);
+                  }
+                }}
               />
             </motion.div>
           ))}
@@ -244,6 +263,26 @@ export default function Dashboard() {
           </motion.div>
         )}
       </div>
+      
+      <RequestToolModal open={requestToolOpen} onOpenChange={setRequestToolOpen} />
+      <ToolDetailsModal 
+        tool={selectedTool} 
+        open={detailsOpen} 
+        onOpenChange={setDetailsOpen}
+        onRequestAccess={(id) => {
+          setDetailsOpen(false);
+          const t = mockTools.find(t => t.id === id);
+          if (t) {
+            setSelectedTool(t);
+            setAccessRequestOpen(true);
+          }
+        }}
+      />
+      <AccessRequestModal 
+        tool={selectedTool} 
+        open={accessRequestOpen} 
+        onOpenChange={setAccessRequestOpen} 
+      />
     </DashboardLayout>
   );
 }

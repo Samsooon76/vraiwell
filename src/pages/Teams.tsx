@@ -18,6 +18,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { AddTeamModal } from "@/components/modals/AddTeamModal";
 
 interface Team {
   id: string;
@@ -39,6 +40,7 @@ const mockTeams: Team[] = [
 
 export default function Teams() {
   const [searchQuery, setSearchQuery] = useState("");
+  const [addTeamOpen, setAddTeamOpen] = useState(false);
 
   const filteredTeams = mockTeams.filter((team) =>
     team.name.toLowerCase().includes(searchQuery.toLowerCase())
@@ -61,7 +63,7 @@ export default function Teams() {
               Gérez vos équipes et leurs accès aux outils
             </p>
           </div>
-          <Button variant="hero" size="lg">
+          <Button variant="hero" size="lg" onClick={() => setAddTeamOpen(true)}>
             <Plus className="h-4 w-4" />
             Nouvelle équipe
           </Button>
@@ -194,6 +196,8 @@ export default function Teams() {
           ))}
         </motion.div>
       </div>
+      
+      <AddTeamModal open={addTeamOpen} onOpenChange={setAddTeamOpen} />
     </DashboardLayout>
   );
 }
