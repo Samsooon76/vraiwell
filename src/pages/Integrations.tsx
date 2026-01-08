@@ -14,6 +14,7 @@ import {
   Loader2
 } from "lucide-react";
 import { AddIntegrationModal } from "@/components/modals/AddIntegrationModal";
+import { GoogleWorkspaceModal } from "@/components/modals/GoogleWorkspaceModal";
 import { useGoogleAuth } from "@/hooks/useGoogleAuth";
 import { toast } from "sonner";
 
@@ -47,6 +48,7 @@ type FilterStatus = "all" | "connected" | "available";
 export default function Integrations() {
   const [filter, setFilter] = useState<FilterStatus>("all");
   const [addIntegrationOpen, setAddIntegrationOpen] = useState(false);
+  const [googleConfigOpen, setGoogleConfigOpen] = useState(false);
   const [integrations, setIntegrations] = useState<Integration[]>(defaultIntegrations);
   
   const { connectGoogle, isConnecting, checkGoogleConnection } = useGoogleAuth();
@@ -207,7 +209,16 @@ export default function Integrations() {
               <div className="flex gap-2">
                 {integration.status === "connected" && (
                   <>
-                    <Button variant="soft" size="sm" className="flex-1">
+                    <Button 
+                      variant="soft" 
+                      size="sm" 
+                      className="flex-1"
+                      onClick={() => {
+                        if (integration.name === "Google Workspace") {
+                          setGoogleConfigOpen(true);
+                        }
+                      }}
+                    >
                       <Settings className="h-4 w-4" />
                       Configurer
                     </Button>
@@ -271,6 +282,7 @@ export default function Integrations() {
       </div>
       
       <AddIntegrationModal open={addIntegrationOpen} onOpenChange={setAddIntegrationOpen} />
+      <GoogleWorkspaceModal open={googleConfigOpen} onOpenChange={setGoogleConfigOpen} />
     </DashboardLayout>
   );
 }
