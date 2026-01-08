@@ -1,6 +1,6 @@
 import { motion } from "framer-motion";
 import { Search, Filter, Plus, LayoutGrid, Plug, CreditCard, Users } from "lucide-react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { ToolCard, Tool } from "@/components/tools/ToolCard";
 import { StatsCard } from "@/components/dashboard/StatsCard";
@@ -9,9 +9,8 @@ import { Input } from "@/components/ui/input";
 import { RequestToolModal } from "@/components/modals/RequestToolModal";
 import { ToolDetailsModal } from "@/components/modals/ToolDetailsModal";
 import { AccessRequestModal } from "@/components/modals/AccessRequestModal";
-
-// Empty initial state - tools will be fetched from database
-const initialTools: Tool[] = [];
+import { useGoogleAuth } from "@/hooks/useGoogleAuth";
+import { useMicrosoftAuth } from "@/hooks/useMicrosoftAuth";
 
 const categories = ["Tous", "CRM", "Communication", "Productivité", "Développement", "Design", "RH"];
 
@@ -22,7 +21,51 @@ export default function Dashboard() {
   const [selectedTool, setSelectedTool] = useState<Tool | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [accessRequestOpen, setAccessRequestOpen] = useState(false);
-  const [tools] = useState<Tool[]>(initialTools);
+  const [tools, setTools] = useState<Tool[]>([]);
+  
+  const { checkGoogleConnection } = useGoogleAuth();
+  const { checkMicrosoftConnection } = useMicrosoftAuth();
+
+  // Check connected integrations and add them to tools
+  useEffect(() => {
+    const loadConnectedTools = async () => {
+      const connectedTools: Tool[] = [];
+      
+      const isGoogleConnected = await checkGoogleConnection();
+      if (isGoogleConnected) {
+        connectedTools.push({
+          id: "google-workspace",
+          name: "Google Workspace",
+          description: "Suite bureautique cloud - Gmail, Drive, Calendar, Meet",
+          icon: "google",
+          category: "Productivité",
+          status: "active",
+          monthlySpend: 0,
+          seats: 1,
+          usedSeats: 1,
+        });
+      }
+      
+      const isMicrosoftConnected = await checkMicrosoftConnection();
+      if (isMicrosoftConnected) {
+        connectedTools.push({
+          id: "microsoft-365",
+          name: "Microsoft 365",
+          description: "Suite Microsoft - Outlook, OneDrive, Teams, Office",
+          icon: "microsoft",
+          category: "Productivité",
+          status: "active",
+          monthlySpend: 0,
+          seats: 1,
+          usedSeats: 1,
+        });
+      }
+      
+      setTools(connectedTools);
+    };
+    
+    loadConnectedTools();
+  }, []);
 
   const filteredTools = tools.filter((tool) => {
     const matchesSearch = tool.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
