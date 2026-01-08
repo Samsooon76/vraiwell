@@ -1,5 +1,5 @@
 import { motion } from "framer-motion";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -10,9 +10,12 @@ import {
   Settings,
   ExternalLink,
   RefreshCw,
-  AlertCircle
+  AlertCircle,
+  Loader2
 } from "lucide-react";
 import { AddIntegrationModal } from "@/components/modals/AddIntegrationModal";
+import { useGoogleAuth } from "@/hooks/useGoogleAuth";
+import { toast } from "sonner";
 
 interface Integration {
   id: string;
@@ -25,7 +28,7 @@ interface Integration {
 }
 
 const mockIntegrations: Integration[] = [
-  { id: "1", name: "Google Workspace", description: "Suite bureautique cloud", category: "Productivité", status: "connected", lastSync: "Il y a 5 min", actions: 8 },
+  { id: "1", name: "Google Workspace", description: "Suite bureautique cloud", category: "Productivité", status: "available" },
   { id: "2", name: "Slack", description: "Communication d'équipe", category: "Communication", status: "connected", lastSync: "Il y a 2 min", actions: 6 },
   { id: "3", name: "HubSpot", description: "CRM et marketing", category: "CRM", status: "connected", lastSync: "Il y a 15 min", actions: 12 },
   { id: "4", name: "Notion", description: "Documentation collaborative", category: "Productivité", status: "connected", lastSync: "Il y a 8 min", actions: 5 },
@@ -44,15 +47,41 @@ type FilterStatus = "all" | "connected" | "available";
 export default function Integrations() {
   const [filter, setFilter] = useState<FilterStatus>("all");
   const [addIntegrationOpen, setAddIntegrationOpen] = useState(false);
+  const [integrations, setIntegrations] = useState<Integration[]>(mockIntegrations);
+  
+  const { connectGoogle, isConnecting, checkGoogleConnection } = useGoogleAuth();
 
-  const filteredIntegrations = mockIntegrations.filter((integration) =>
+  // Check Google connection status on mount
+  useEffect(() => {
+    const checkConnections = async () => {
+      const isGoogleConnected = await checkGoogleConnection();
+      if (isGoogleConnected) {
+        setIntegrations(prev => prev.map(int => 
+          int.name === "Google Workspace" 
+            ? { ...int, status: "connected" as const, lastSync: "Connecté", actions: 8 }
+            : int
+        ));
+      }
+    };
+    checkConnections();
+  }, []);
+
+  const handleConnectGoogle = async () => {
+    try {
+      await connectGoogle();
+    } catch (error) {
+      toast.error("Erreur de connexion Google");
+    }
+  };
+
+  const filteredIntegrations = integrations.filter((integration) =>
     filter === "all" ? true : 
     filter === "connected" ? integration.status === "connected" || integration.status === "error" :
     integration.status === "available"
   );
 
-  const connectedCount = mockIntegrations.filter(i => i.status === "connected").length;
-  const errorCount = mockIntegrations.filter(i => i.status === "error").length;
+  const connectedCount = integrations.filter(i => i.status === "connected").length;
+  const errorCount = integrations.filter(i => i.status === "error").length;
 
   return (
     <DashboardLayout>
@@ -188,10 +217,27 @@ export default function Integrations() {
                   </>
                 )}
                 {integration.status === "available" && (
-                  <Button variant="default" size="sm" className="flex-1" onClick={() => setAddIntegrationOpen(true)}>
-                    <Plus className="h-4 w-4" />
-                    Connecter
-                  </Button>
+                  integration.name === "Google Workspace" ? (
+                    <Button 
+                      variant="default" 
+                      size="sm" 
+                      className="flex-1" 
+                      onClick={handleConnectGoogle}
+                      disabled={isConnecting}
+                    >
+                      {isConnecting ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Plus className="h-4 w-4" />
+                      )}
+                      {isConnecting ? "Connexion..." : "Connecter"}
+                    </Button>
+                  ) : (
+                    <Button variant="default" size="sm" className="flex-1" onClick={() => setAddIntegrationOpen(true)}>
+                      <Plus className="h-4 w-4" />
+                      Connecter
+                    </Button>
+                  )
                 )}
                 {integration.status === "error" && (
                   <Button variant="destructive" size="sm" className="flex-1">
