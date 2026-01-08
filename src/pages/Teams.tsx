@@ -29,24 +29,19 @@ interface Team {
   lead?: string;
 }
 
-const mockTeams: Team[] = [
-  { id: "1", name: "Engineering", description: "Équipe technique et développement", color: "#2563eb", memberCount: 45, lead: "Thomas Martin" },
-  { id: "2", name: "Sales", description: "Équipe commerciale", color: "#f59e0b", memberCount: 32, lead: "Marie Dupont" },
-  { id: "3", name: "Marketing", description: "Équipe marketing et communication", color: "#8b5cf6", memberCount: 28, lead: "Sophie Bernard" },
-  { id: "4", name: "Product", description: "Équipe produit et design", color: "#0f766e", memberCount: 22, lead: "Lucas Petit" },
-  { id: "5", name: "Finance", description: "Équipe finance et comptabilité", color: "#dc2626", memberCount: 12, lead: "Emma Leroy" },
-  { id: "6", name: "HR", description: "Ressources humaines", color: "#ec4899", memberCount: 8, lead: "Julie Martin" },
-];
+// Empty initial state
+const initialTeams: Team[] = [];
 
 export default function Teams() {
   const [searchQuery, setSearchQuery] = useState("");
   const [addTeamOpen, setAddTeamOpen] = useState(false);
+  const [teams] = useState<Team[]>(initialTeams);
 
-  const filteredTeams = mockTeams.filter((team) =>
+  const filteredTeams = teams.filter((team) =>
     team.name.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  const totalMembers = mockTeams.reduce((sum, team) => sum + team.memberCount, 0);
+  const totalMembers = teams.reduce((sum, team) => sum + team.memberCount, 0);
 
   return (
     <DashboardLayout>
@@ -82,7 +77,7 @@ export default function Teams() {
                 <Users className="h-5 w-5" />
               </div>
               <div>
-                <p className="text-2xl font-bold text-foreground">{mockTeams.length}</p>
+                <p className="text-2xl font-bold text-foreground">{teams.length}</p>
                 <p className="text-sm text-muted-foreground">Équipes</p>
               </div>
             </div>
@@ -104,7 +99,7 @@ export default function Teams() {
                 <Mail className="h-5 w-5" />
               </div>
               <div>
-                <p className="text-2xl font-bold text-foreground">3</p>
+                <p className="text-2xl font-bold text-foreground">0</p>
                 <p className="text-sm text-muted-foreground">Invitations en attente</p>
               </div>
             </div>
