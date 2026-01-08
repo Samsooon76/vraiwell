@@ -113,13 +113,22 @@ export function Sidebar() {
       <div className="border-t border-border p-4">
         <div className="flex items-center gap-3 rounded-lg px-3 py-2">
           <div className="flex h-9 w-9 items-center justify-center rounded-full bg-accent">
-            <span className="text-sm font-medium text-accent-foreground">SA</span>
+            <span className="text-sm font-medium text-accent-foreground">
+              {user?.email?.charAt(0).toUpperCase() || "U"}
+            </span>
           </div>
           <div className="flex-1 min-w-0">
-            <p className="truncate text-sm font-medium text-foreground">Sabrina Admin</p>
-            <p className="truncate text-xs text-muted-foreground">RevOps Lead</p>
+            <p className="truncate text-sm font-medium text-foreground">
+              {user?.email?.split("@")[0] || "Utilisateur"}
+            </p>
+            <p className="truncate text-xs text-muted-foreground">
+              {user?.email || ""}
+            </p>
           </div>
-          <button className="rounded-lg p-2 text-muted-foreground hover:bg-accent hover:text-foreground transition-colors">
+          <button 
+            onClick={handleSignOut}
+            className="rounded-lg p-2 text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+          >
             <LogOut className="h-4 w-4" />
           </button>
         </div>

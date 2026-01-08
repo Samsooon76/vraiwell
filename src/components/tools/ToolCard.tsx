@@ -3,6 +3,7 @@ import { ExternalLink, Check, Clock, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
+import { ToolLogo } from "./ToolLogo";
 
 export interface Tool {
   id: string;
@@ -55,9 +56,7 @@ export function ToolCard({ tool, onRequestAccess, onOpenTool }: ToolCardProps) {
       {/* Header */}
       <div className="flex items-start justify-between gap-4">
         <div className="flex items-center gap-3">
-          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-muted text-2xl">
-            {tool.icon}
-          </div>
+          <ToolLogo name={tool.name} size="lg" />
           <div>
             <h3 className="font-display text-base font-semibold text-foreground group-hover:text-primary transition-colors">
               {tool.name}
