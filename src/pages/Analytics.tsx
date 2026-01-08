@@ -24,29 +24,10 @@ import {
   Cell,
 } from "recharts";
 
-const spendData = [
-  { month: "Jan", spend: 4200 },
-  { month: "Fév", spend: 4500 },
-  { month: "Mar", spend: 4300 },
-  { month: "Avr", spend: 4800 },
-  { month: "Mai", spend: 5100 },
-  { month: "Juin", spend: 4880 },
-];
-
-const toolSpendData = [
-  { name: "Payfit", spend: 2100, color: "#0f766e" },
-  { name: "Slack", spend: 1250, color: "#2563eb" },
-  { name: "HubSpot", spend: 890, color: "#f59e0b" },
-  { name: "Notion", spend: 640, color: "#8b5cf6" },
-];
-
-const teamSpendData = [
-  { team: "Engineering", spend: 2400, seats: 45 },
-  { team: "Sales", spend: 1800, seats: 32 },
-  { team: "Marketing", spend: 1200, seats: 28 },
-  { team: "Product", spend: 980, seats: 22 },
-  { team: "Design", spend: 500, seats: 12 },
-];
+// Empty initial state - data will come from database
+const spendData: { month: string; spend: number }[] = [];
+const toolSpendData: { name: string; spend: number; color: string }[] = [];
+const teamSpendData: { team: string; spend: number; seats: number }[] = [];
 
 const COLORS = ["#0f766e", "#2563eb", "#f59e0b", "#8b5cf6"];
 
@@ -75,30 +56,28 @@ export default function Analytics() {
         >
           <StatsCard
             title="Dépenses totales"
-            value="€4,880"
+            value="€0"
             subtitle="ce mois"
             icon={CreditCard}
-            trend={{ value: 8, isPositive: false }}
             variant="primary"
           />
           <StatsCard
             title="Économies potentielles"
-            value="€340"
+            value="€0"
             subtitle="licences inutilisées"
             icon={TrendingUp}
             variant="warning"
           />
           <StatsCard
             title="Taux d'utilisation"
-            value="87%"
-            subtitle="+3% vs mois dernier"
+            value="0%"
+            subtitle="aucune donnée"
             icon={Users}
-            trend={{ value: 3, isPositive: true }}
             variant="success"
           />
           <StatsCard
             title="Alertes"
-            value="2"
+            value="0"
             subtitle="licences à optimiser"
             icon={AlertTriangle}
           />

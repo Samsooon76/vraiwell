@@ -5,64 +5,14 @@ import { RequestItem, AccessRequest } from "@/components/requests/RequestItem";
 import { Button } from "@/components/ui/button";
 import { Clock, CheckCircle, XCircle, Filter } from "lucide-react";
 
-const mockRequests: AccessRequest[] = [
-  {
-    id: "1",
-    userName: "Marie Dupont",
-    userEmail: "marie.dupont@example.com",
-    toolName: "Figma",
-    toolIcon: "🎨",
-    status: "pending",
-    requestedAt: "Il y a 2h",
-    team: "Design",
-  },
-  {
-    id: "2",
-    userName: "Thomas Martin",
-    userEmail: "thomas.martin@example.com",
-    toolName: "GitHub",
-    toolIcon: "🐙",
-    status: "pending",
-    requestedAt: "Il y a 4h",
-    team: "Engineering",
-  },
-  {
-    id: "3",
-    userName: "Sophie Bernard",
-    userEmail: "sophie.bernard@example.com",
-    toolName: "Salesforce",
-    toolIcon: "☁️",
-    status: "pending",
-    requestedAt: "Hier",
-    team: "Sales",
-  },
-  {
-    id: "4",
-    userName: "Lucas Petit",
-    userEmail: "lucas.petit@example.com",
-    toolName: "Notion",
-    toolIcon: "📝",
-    status: "approved",
-    requestedAt: "Il y a 2j",
-    team: "Product",
-  },
-  {
-    id: "5",
-    userName: "Emma Leroy",
-    userEmail: "emma.leroy@example.com",
-    toolName: "Slack",
-    toolIcon: "💬",
-    status: "rejected",
-    requestedAt: "Il y a 3j",
-    team: "Marketing",
-  },
-];
+// Empty initial state
+const initialRequests: AccessRequest[] = [];
 
 type StatusFilter = "all" | "pending" | "approved" | "rejected";
 
 export default function Requests() {
   const [filter, setFilter] = useState<StatusFilter>("all");
-  const [requests, setRequests] = useState(mockRequests);
+  const [requests, setRequests] = useState<AccessRequest[]>(initialRequests);
 
   const filteredRequests = requests.filter((r) => 
     filter === "all" ? true : r.status === filter

@@ -34,51 +34,8 @@ interface Workflow {
   runsCount: number;
 }
 
-const mockWorkflows: Workflow[] = [
-  {
-    id: "1",
-    name: "Onboarding Standard",
-    description: "Workflow d'onboarding pour nouveaux employés",
-    type: "onboarding",
-    isActive: true,
-    steps: [
-      { name: "Créer compte Google", tool: "Google Workspace" },
-      { name: "Inviter sur Slack", tool: "Slack" },
-      { name: "Ajouter à Notion", tool: "Notion" },
-    ],
-    lastRun: "Il y a 2h",
-    runsCount: 45,
-  },
-  {
-    id: "2",
-    name: "Onboarding Tech",
-    description: "Workflow d'onboarding pour développeurs",
-    type: "onboarding",
-    isActive: true,
-    steps: [
-      { name: "Créer compte Google", tool: "Google Workspace" },
-      { name: "Inviter sur Slack", tool: "Slack" },
-      { name: "Accès GitHub", tool: "GitHub" },
-      { name: "Ajouter à Notion", tool: "Notion" },
-    ],
-    lastRun: "Il y a 1j",
-    runsCount: 23,
-  },
-  {
-    id: "3",
-    name: "Offboarding Standard",
-    description: "Workflow de départ collaborateur",
-    type: "offboarding",
-    isActive: true,
-    steps: [
-      { name: "Désactiver Google", tool: "Google Workspace" },
-      { name: "Retirer de Slack", tool: "Slack" },
-      { name: "Archiver Notion", tool: "Notion" },
-    ],
-    lastRun: "Il y a 5j",
-    runsCount: 12,
-  },
-];
+// Empty initial state
+const initialWorkflows: Workflow[] = [];
 
 const typeConfig = {
   onboarding: { label: "Onboarding", icon: Users, color: "bg-success/10 text-success" },
@@ -87,7 +44,7 @@ const typeConfig = {
 };
 
 export default function Workflows() {
-  const [workflows] = useState(mockWorkflows);
+  const [workflows] = useState<Workflow[]>(initialWorkflows);
   const [addWorkflowOpen, setAddWorkflowOpen] = useState(false);
 
   const activeCount = workflows.filter(w => w.isActive).length;

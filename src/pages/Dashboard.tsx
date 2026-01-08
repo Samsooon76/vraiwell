@@ -10,85 +10,8 @@ import { RequestToolModal } from "@/components/modals/RequestToolModal";
 import { ToolDetailsModal } from "@/components/modals/ToolDetailsModal";
 import { AccessRequestModal } from "@/components/modals/AccessRequestModal";
 
-// Mock data
-const mockTools: Tool[] = [
-  {
-    id: "1",
-    name: "HubSpot",
-    description: "CRM et marketing automation pour gérer vos prospects et clients.",
-    icon: "🟠",
-    category: "CRM",
-    status: "active",
-    seats: 50,
-    usedSeats: 42,
-    monthlySpend: 890,
-  },
-  {
-    id: "2",
-    name: "Slack",
-    description: "Communication d'équipe et messagerie instantanée.",
-    icon: "💬",
-    category: "Communication",
-    status: "active",
-    seats: 100,
-    usedSeats: 95,
-    monthlySpend: 1250,
-  },
-  {
-    id: "3",
-    name: "Notion",
-    description: "Documentation et gestion de projet collaborative.",
-    icon: "📝",
-    category: "Productivité",
-    status: "active",
-    seats: 80,
-    usedSeats: 72,
-    monthlySpend: 640,
-  },
-  {
-    id: "4",
-    name: "GitHub",
-    description: "Hébergement de code source et collaboration développeur.",
-    icon: "🐙",
-    category: "Développement",
-    status: "available",
-  },
-  {
-    id: "5",
-    name: "Figma",
-    description: "Design collaboratif et prototypage.",
-    icon: "🎨",
-    category: "Design",
-    status: "pending",
-  },
-  {
-    id: "6",
-    name: "Salesforce",
-    description: "CRM enterprise pour grandes équipes commerciales.",
-    icon: "☁️",
-    category: "CRM",
-    status: "available",
-  },
-  {
-    id: "7",
-    name: "Payfit",
-    description: "Gestion de la paie et des RH simplifiée.",
-    icon: "💰",
-    category: "RH",
-    status: "active",
-    seats: 300,
-    usedSeats: 285,
-    monthlySpend: 2100,
-  },
-  {
-    id: "8",
-    name: "Asana",
-    description: "Gestion de projet et suivi des tâches d'équipe.",
-    icon: "🎯",
-    category: "Productivité",
-    status: "available",
-  },
-];
+// Empty initial state - tools will be fetched from database
+const initialTools: Tool[] = [];
 
 const categories = ["Tous", "CRM", "Communication", "Productivité", "Développement", "Design", "RH"];
 
@@ -99,15 +22,16 @@ export default function Dashboard() {
   const [selectedTool, setSelectedTool] = useState<Tool | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [accessRequestOpen, setAccessRequestOpen] = useState(false);
+  const [tools] = useState<Tool[]>(initialTools);
 
-  const filteredTools = mockTools.filter((tool) => {
+  const filteredTools = tools.filter((tool) => {
     const matchesSearch = tool.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       tool.description.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesCategory = selectedCategory === "Tous" || tool.category === selectedCategory;
     return matchesSearch && matchesCategory;
   });
 
-  const activeTools = mockTools.filter(t => t.status === "active");
+  const activeTools = tools.filter(t => t.status === "active");
   const totalSpend = activeTools.reduce((sum, t) => sum + (t.monthlySpend || 0), 0);
   const totalSeats = activeTools.reduce((sum, t) => sum + (t.seats || 0), 0);
   const usedSeats = activeTools.reduce((sum, t) => sum + (t.usedSeats || 0), 0);
@@ -137,7 +61,7 @@ export default function Dashboard() {
           <StatsCard
             title="Outils actifs"
             value={activeTools.length}
-            subtitle={`sur ${mockTools.length} disponibles`}
+            subtitle={`sur ${tools.length} disponibles`}
             icon={Plug}
             variant="primary"
           />
@@ -149,14 +73,14 @@ export default function Dashboard() {
           />
           <StatsCard
             title="Licences utilisées"
-            value={`${usedSeats}/${totalSeats}`}
-            subtitle={`${Math.round((usedSeats / totalSeats) * 100)}% d'utilisation`}
+            value={totalSeats > 0 ? `${usedSeats}/${totalSeats}` : "0"}
+            subtitle={totalSeats > 0 ? `${Math.round((usedSeats / totalSeats) * 100)}% d'utilisation` : "Aucune licence"}
             icon={Users}
             variant="success"
           />
           <StatsCard
             title="Intégrations"
-            value={12}
+            value={0}
             subtitle="connectées"
             icon={LayoutGrid}
           />
@@ -227,14 +151,14 @@ export default function Dashboard() {
               <ToolCard
                 tool={tool}
                 onRequestAccess={(id) => {
-                  const t = mockTools.find(t => t.id === id);
+                  const t = tools.find(t => t.id === id);
                   if (t) {
                     setSelectedTool(t);
                     setAccessRequestOpen(true);
                   }
                 }}
                 onOpenTool={(id) => {
-                  const t = mockTools.find(t => t.id === id);
+                  const t = tools.find(t => t.id === id);
                   if (t) {
                     setSelectedTool(t);
                     setDetailsOpen(true);
@@ -271,7 +195,7 @@ export default function Dashboard() {
         onOpenChange={setDetailsOpen}
         onRequestAccess={(id) => {
           setDetailsOpen(false);
-          const t = mockTools.find(t => t.id === id);
+          const t = tools.find(t => t.id === id);
           if (t) {
             setSelectedTool(t);
             setAccessRequestOpen(true);
