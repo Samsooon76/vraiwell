@@ -15,7 +15,9 @@ import {
 } from "lucide-react";
 import { AddIntegrationModal } from "@/components/modals/AddIntegrationModal";
 import { GoogleWorkspaceModal } from "@/components/modals/GoogleWorkspaceModal";
+import { MicrosoftWorkspaceModal } from "@/components/modals/MicrosoftWorkspaceModal";
 import { useGoogleAuth } from "@/hooks/useGoogleAuth";
+import { useMicrosoftAuth } from "@/hooks/useMicrosoftAuth";
 import { toast } from "sonner";
 
 interface Integration {
@@ -49,11 +51,13 @@ export default function Integrations() {
   const [filter, setFilter] = useState<FilterStatus>("all");
   const [addIntegrationOpen, setAddIntegrationOpen] = useState(false);
   const [googleConfigOpen, setGoogleConfigOpen] = useState(false);
+  const [microsoftConfigOpen, setMicrosoftConfigOpen] = useState(false);
   const [integrations, setIntegrations] = useState<Integration[]>(defaultIntegrations);
   
-  const { connectGoogle, isConnecting, checkGoogleConnection } = useGoogleAuth();
+  const { connectGoogle, isConnecting: isConnectingGoogle, checkGoogleConnection } = useGoogleAuth();
+  const { connectMicrosoft, isConnecting: isConnectingMicrosoft, checkMicrosoftConnection } = useMicrosoftAuth();
 
-  // Check Google connection status on mount
+  // Check connection status on mount
   useEffect(() => {
     const checkConnections = async () => {
       const isGoogleConnected = await checkGoogleConnection();
@@ -61,6 +65,15 @@ export default function Integrations() {
         setIntegrations(prev => prev.map(int => 
           int.name === "Google Workspace" 
             ? { ...int, status: "connected" as const, lastSync: "Connecté", actions: 8 }
+            : int
+        ));
+      }
+      
+      const isMicrosoftConnected = await checkMicrosoftConnection();
+      if (isMicrosoftConnected) {
+        setIntegrations(prev => prev.map(int => 
+          int.name === "Microsoft 365" 
+            ? { ...int, status: "connected" as const, lastSync: "Connecté", actions: 12 }
             : int
         ));
       }
@@ -73,6 +86,14 @@ export default function Integrations() {
       await connectGoogle();
     } catch (error) {
       toast.error("Erreur de connexion Google");
+    }
+  };
+
+  const handleConnectMicrosoft = async () => {
+    try {
+      await connectMicrosoft();
+    } catch (error) {
+      toast.error("Erreur de connexion Microsoft");
     }
   };
 
@@ -216,6 +237,8 @@ export default function Integrations() {
                       onClick={() => {
                         if (integration.name === "Google Workspace") {
                           setGoogleConfigOpen(true);
+                        } else if (integration.name === "Microsoft 365") {
+                          setMicrosoftConfigOpen(true);
                         }
                       }}
                     >
@@ -234,14 +257,29 @@ export default function Integrations() {
                       size="sm" 
                       className="flex-1" 
                       onClick={handleConnectGoogle}
-                      disabled={isConnecting}
+                      disabled={isConnectingGoogle}
                     >
-                      {isConnecting ? (
+                      {isConnectingGoogle ? (
                         <Loader2 className="h-4 w-4 animate-spin" />
                       ) : (
                         <Plus className="h-4 w-4" />
                       )}
-                      {isConnecting ? "Connexion..." : "Connecter"}
+                      {isConnectingGoogle ? "Connexion..." : "Connecter"}
+                    </Button>
+                  ) : integration.name === "Microsoft 365" ? (
+                    <Button 
+                      variant="default" 
+                      size="sm" 
+                      className="flex-1" 
+                      onClick={handleConnectMicrosoft}
+                      disabled={isConnectingMicrosoft}
+                    >
+                      {isConnectingMicrosoft ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Plus className="h-4 w-4" />
+                      )}
+                      {isConnectingMicrosoft ? "Connexion..." : "Connecter"}
                     </Button>
                   ) : (
                     <Button variant="default" size="sm" className="flex-1" onClick={() => setAddIntegrationOpen(true)}>
@@ -292,6 +330,18 @@ export default function Integrations() {
               : int
           ));
           toast.success("Google Workspace déconnecté");
+        }}
+      />
+      <MicrosoftWorkspaceModal 
+        open={microsoftConfigOpen} 
+        onOpenChange={setMicrosoftConfigOpen}
+        onDisconnect={() => {
+          setIntegrations(prev => prev.map(int => 
+            int.name === "Microsoft 365" 
+              ? { ...int, status: "available" as const, lastSync: undefined, actions: undefined }
+              : int
+          ));
+          toast.success("Microsoft 365 déconnecté");
         }}
       />
     </DashboardLayout>
