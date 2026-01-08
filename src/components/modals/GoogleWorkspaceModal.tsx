@@ -18,16 +18,20 @@ import {
   RefreshCw,
   Mail,
   Shield,
-  AlertCircle
+  AlertCircle,
+  Unlink
 } from "lucide-react";
+import { ConfirmModal } from "./ConfirmModal";
 
 interface GoogleWorkspaceModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onDisconnect?: () => void;
 }
 
-export function GoogleWorkspaceModal({ open, onOpenChange }: GoogleWorkspaceModalProps) {
+export function GoogleWorkspaceModal({ open, onOpenChange, onDisconnect }: GoogleWorkspaceModalProps) {
   const [search, setSearch] = useState("");
+  const [confirmDisconnectOpen, setConfirmDisconnectOpen] = useState(false);
   const { fetchGoogleUsers, googleUsers, isLoadingUsers, error } = useGoogleAuth();
 
   useEffect(() => {
@@ -35,6 +39,12 @@ export function GoogleWorkspaceModal({ open, onOpenChange }: GoogleWorkspaceModa
       fetchGoogleUsers();
     }
   }, [open]);
+
+  const handleDisconnect = () => {
+    setConfirmDisconnectOpen(false);
+    onOpenChange(false);
+    onDisconnect?.();
+  };
 
   const filteredUsers = googleUsers.filter(user =>
     user.name.toLowerCase().includes(search.toLowerCase()) ||
@@ -141,16 +151,35 @@ export function GoogleWorkspaceModal({ open, onOpenChange }: GoogleWorkspaceModa
           )}
         </div>
 
-        <div className="flex justify-end gap-2 mt-4">
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Fermer
+        <div className="flex justify-between gap-2 mt-4">
+          <Button 
+            variant="destructive" 
+            onClick={() => setConfirmDisconnectOpen(true)}
+          >
+            <Unlink className="h-4 w-4" />
+            Déconnecter
           </Button>
-          <Button onClick={() => fetchGoogleUsers()} disabled={isLoadingUsers}>
-            <RefreshCw className={`h-4 w-4 ${isLoadingUsers ? 'animate-spin' : ''}`} />
-            Actualiser
-          </Button>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={() => onOpenChange(false)}>
+              Fermer
+            </Button>
+            <Button onClick={() => fetchGoogleUsers()} disabled={isLoadingUsers}>
+              <RefreshCw className={`h-4 w-4 ${isLoadingUsers ? 'animate-spin' : ''}`} />
+              Actualiser
+            </Button>
+          </div>
         </div>
       </DialogContent>
+
+      <ConfirmModal
+        open={confirmDisconnectOpen}
+        onOpenChange={setConfirmDisconnectOpen}
+        title="Déconnecter Google Workspace"
+        description="Êtes-vous sûr de vouloir déconnecter Google Workspace ? Vous devrez vous reconnecter pour accéder aux utilisateurs de votre organisation."
+        confirmText="Déconnecter"
+        variant="destructive"
+        onConfirm={handleDisconnect}
+      />
     </Dialog>
   );
 }

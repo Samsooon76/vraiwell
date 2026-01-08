@@ -282,7 +282,18 @@ export default function Integrations() {
       </div>
       
       <AddIntegrationModal open={addIntegrationOpen} onOpenChange={setAddIntegrationOpen} />
-      <GoogleWorkspaceModal open={googleConfigOpen} onOpenChange={setGoogleConfigOpen} />
+      <GoogleWorkspaceModal 
+        open={googleConfigOpen} 
+        onOpenChange={setGoogleConfigOpen}
+        onDisconnect={() => {
+          setIntegrations(prev => prev.map(int => 
+            int.name === "Google Workspace" 
+              ? { ...int, status: "available" as const, lastSync: undefined, actions: undefined }
+              : int
+          ));
+          toast.success("Google Workspace déconnecté");
+        }}
+      />
     </DashboardLayout>
   );
 }
