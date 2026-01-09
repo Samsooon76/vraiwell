@@ -163,8 +163,8 @@ export function GoogleWorkspaceModal({ open, onOpenChange, onDisconnect }: Googl
       if (!isOpen) resetAddUserForm();
       onOpenChange(isOpen);
     }}>
-      <DialogContent className="sm:max-w-[600px]">
-        <DialogHeader>
+      <DialogContent className="sm:max-w-[600px] max-h-[85vh] flex flex-col">
+        <DialogHeader className="shrink-0">
           <DialogTitle className="font-display text-xl flex items-center gap-2">
             <Users className="h-5 w-5 text-primary" />
             Google Workspace
@@ -174,18 +174,22 @@ export function GoogleWorkspaceModal({ open, onOpenChange, onDisconnect }: Googl
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4 mt-4">
+        <div className="flex-1 overflow-y-auto space-y-4 mt-4 pr-2">
           {/* License info banner */}
           {licenseInfo && (
-            <div className="rounded-lg bg-muted/50 p-3 flex items-center gap-3">
-              <CreditCard className="h-5 w-5 text-primary shrink-0" />
-              <div className="flex-1">
-                <p className="text-sm font-medium">{licenseInfo.totalUsers} utilisateurs</p>
-                {licenseInfo.usedLicenses > 0 && (
-                  <p className="text-xs text-muted-foreground">
-                    {licenseInfo.usedLicenses} licences attribuées
-                  </p>
-                )}
+            <div className="rounded-lg bg-primary/5 border border-primary/20 p-4 flex items-center gap-4">
+              <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                <CreditCard className="h-5 w-5 text-primary" />
+              </div>
+              <div className="flex-1 grid grid-cols-2 gap-4">
+                <div>
+                  <p className="text-xs text-muted-foreground">Utilisateurs</p>
+                  <p className="text-lg font-semibold">{licenseInfo.totalUsers}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Licences attribuées</p>
+                  <p className="text-lg font-semibold">{licenseInfo.usedLicenses}</p>
+                </div>
               </div>
             </div>
           )}
@@ -332,7 +336,7 @@ export function GoogleWorkspaceModal({ open, onOpenChange, onDisconnect }: Googl
           </div>
 
           {/* Users list */}
-          <div className="max-h-[300px] overflow-y-auto space-y-2">
+          <div className="space-y-2">
             {isLoadingUsers ? (
               <div className="flex flex-col items-center justify-center py-12">
                 <Loader2 className="h-8 w-8 animate-spin text-primary mb-3" />
@@ -421,7 +425,7 @@ export function GoogleWorkspaceModal({ open, onOpenChange, onDisconnect }: Googl
           )}
         </div>
 
-        <div className="flex justify-between gap-2 mt-4">
+        <div className="shrink-0 flex justify-between gap-2 mt-4 pt-4 border-t">
           <Button 
             variant="destructive" 
             onClick={() => setConfirmDisconnectOpen(true)}
