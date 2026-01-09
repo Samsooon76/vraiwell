@@ -398,31 +398,84 @@ export default function Onboarding() {
                       <Users className="h-6 w-6" />
                     </div>
                     <h1 className="font-display text-display-md text-foreground mb-2">
-                      Invitez votre équipe
+                      {isGoogleUser ? "Votre équipe" : "Invitez votre équipe"}
                     </h1>
                     <p className="text-body-md text-muted-foreground">
-                      Collaborez avec vos collègues dès le départ.
+                      {isGoogleUser 
+                        ? "Voici les membres de votre organisation Google Workspace."
+                        : "Collaborez avec vos collègues dès le départ."}
                     </p>
                   </div>
 
-                  <div className="space-y-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="emails">Adresses email</Label>
-                      <div className="relative">
-                        <Mail className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-                        <textarea
-                          id="emails"
-                          placeholder="email@exemple.com, autre@exemple.com"
-                          value={inviteEmails}
-                          onChange={(e) => setInviteEmails(e.target.value)}
-                          className="w-full min-h-[120px] pl-10 pr-4 py-3 rounded-lg border border-border bg-background text-sm resize-none focus:outline-none focus:ring-2 focus:ring-ring"
-                        />
-                      </div>
-                      <p className="text-xs text-muted-foreground">
-                        Séparez les adresses par des virgules ou des retours à la ligne.
+                  {isGoogleUser ? (
+                    <div className="space-y-4">
+                      {isLoadingUsers ? (
+                        <div className="flex items-center justify-center py-8">
+                          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                          <span className="ml-2 text-sm text-muted-foreground">Chargement des utilisateurs...</span>
+                        </div>
+                      ) : googleUsers.length > 0 ? (
+                        <div className="space-y-2 max-h-[300px] overflow-y-auto pr-2">
+                          {googleUsers.map((user) => (
+                            <div 
+                              key={user.id} 
+                              className="flex items-center gap-3 p-3 rounded-lg border border-border bg-background hover:bg-accent/50 transition-colors"
+                            >
+                              {user.avatar ? (
+                                <img
+                                  src={user.avatar}
+                                  alt={user.name}
+                                  className="h-10 w-10 rounded-full"
+                                />
+                              ) : (
+                                <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center">
+                                  <span className="text-sm font-medium text-primary">
+                                    {user.name.charAt(0)}
+                                  </span>
+                                </div>
+                              )}
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm font-medium text-foreground truncate">
+                                  {user.name}
+                                  {user.isCurrentUser && (
+                                    <span className="ml-2 text-xs bg-primary/10 text-primary px-2 py-0.5 rounded-full">(vous)</span>
+                                  )}
+                                </p>
+                                <p className="text-xs text-muted-foreground truncate">{user.email}</p>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="text-center py-8 text-muted-foreground">
+                          <Users className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                          <p className="text-sm">Aucun utilisateur trouvé</p>
+                        </div>
+                      )}
+                      <p className="text-xs text-muted-foreground text-center mt-4">
+                        {googleUsers.length} membre{googleUsers.length > 1 ? "s" : ""} dans votre organisation
                       </p>
                     </div>
-                  </div>
+                  ) : (
+                    <div className="space-y-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="emails">Adresses email</Label>
+                        <div className="relative">
+                          <Mail className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                          <textarea
+                            id="emails"
+                            placeholder="email@exemple.com, autre@exemple.com"
+                            value={inviteEmails}
+                            onChange={(e) => setInviteEmails(e.target.value)}
+                            className="w-full min-h-[120px] pl-10 pr-4 py-3 rounded-lg border border-border bg-background text-sm resize-none focus:outline-none focus:ring-2 focus:ring-ring"
+                          />
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          Séparez les adresses par des virgules ou des retours à la ligne.
+                        </p>
+                      </div>
+                    </div>
+                  )}
                 </motion.div>
               )}
             </AnimatePresence>
