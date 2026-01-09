@@ -33,7 +33,7 @@ export function useGoogleAuth() {
         provider: "google",
         options: {
           redirectTo: `${window.location.origin}${finalRedirect}`,
-          scopes: "email profile https://www.googleapis.com/auth/admin.directory.user.readonly",
+          scopes: "email profile",
         },
       });
 
@@ -94,9 +94,6 @@ export function useGoogleAuth() {
         throw new Error("No active session");
       }
 
-      // Get the provider_token which is the Google access token
-      const providerToken = session.provider_token;
-
       const response = await fetch(
         `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/list-google-users`,
         {
@@ -105,9 +102,6 @@ export function useGoogleAuth() {
             "Content-Type": "application/json",
             Authorization: `Bearer ${session.access_token}`,
           },
-          body: JSON.stringify({
-            provider_token: providerToken,
-          }),
         }
       );
 
@@ -115,11 +109,6 @@ export function useGoogleAuth() {
 
       if (data.error && !data.users) {
         throw new Error(data.error);
-      }
-
-      // If needs reconnect, store this info
-      if (data.needsReconnect) {
-        setError(data.message || "Reconnexion nécessaire pour accéder aux utilisateurs du workspace");
       }
 
       setGoogleUsers(data.users || []);
