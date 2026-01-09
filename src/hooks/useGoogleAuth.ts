@@ -15,15 +15,18 @@ export function useGoogleAuth() {
   const [googleUsers, setGoogleUsers] = useState<GoogleUser[]>([]);
   const [error, setError] = useState<string | null>(null);
 
-  const connectGoogle = async () => {
+  const connectGoogle = async (redirectPath?: string) => {
     setIsConnecting(true);
     setError(null);
 
     try {
+      // Default to current path, or use provided redirect path
+      const finalRedirect = redirectPath || window.location.pathname;
+      
       const { error } = await supabase.auth.signInWithOAuth({
         provider: "google",
         options: {
-          redirectTo: `${window.location.origin}/onboarding?step=2&connected=google`,
+          redirectTo: `${window.location.origin}${finalRedirect}`,
           scopes: "email profile",
         },
       });
