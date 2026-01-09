@@ -109,18 +109,23 @@ export function useInvitations() {
     return `${window.location.origin}/signup?invite=${token}`;
   };
 
-  const checkInvitationByToken = async (token: string): Promise<Invitation | null> => {
+  const checkInvitationByToken = async (token: string): Promise<Partial<Invitation> | null> => {
     try {
-      const { data, error } = await supabase
-        .from("invitations")
-        .select("*")
-        .eq("token", token)
-        .eq("status", "pending")
-        .gt("expires_at", new Date().toISOString())
-        .single();
+      // Use secure RPC function to lookup invitation by token (doesn't expose all invitations)
+      const { data, error } = await supabase.rpc('get_invitation_by_token', {
+        _token: token
+      });
 
-      if (error) return null;
-      return data as Invitation;
+      if (error || !data || data.length === 0) return null;
+      
+      const inv = data[0];
+      return {
+        id: inv.id,
+        email: inv.email,
+        role: inv.role,
+        status: inv.status as 'pending',
+        expires_at: inv.expires_at,
+      };
     } catch {
       return null;
     }
