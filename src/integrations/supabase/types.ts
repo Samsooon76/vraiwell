@@ -55,6 +55,42 @@ export type Database = {
           },
         ]
       }
+      invitations: {
+        Row: {
+          accepted_at: string | null
+          created_at: string
+          email: string
+          expires_at: string
+          id: string
+          invited_by: string | null
+          role: Database["public"]["Enums"]["app_role"]
+          status: string
+          token: string
+        }
+        Insert: {
+          accepted_at?: string | null
+          created_at?: string
+          email: string
+          expires_at?: string
+          id?: string
+          invited_by?: string | null
+          role?: Database["public"]["Enums"]["app_role"]
+          status?: string
+          token?: string
+        }
+        Update: {
+          accepted_at?: string | null
+          created_at?: string
+          email?: string
+          expires_at?: string
+          id?: string
+          invited_by?: string | null
+          role?: Database["public"]["Enums"]["app_role"]
+          status?: string
+          token?: string
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           avatar_url: string | null
@@ -62,6 +98,7 @@ export type Database = {
           email: string
           full_name: string | null
           id: string
+          onboarding_completed: boolean | null
           role: string | null
           updated_at: string
           user_id: string
@@ -72,6 +109,7 @@ export type Database = {
           email: string
           full_name?: string | null
           id?: string
+          onboarding_completed?: boolean | null
           role?: string | null
           updated_at?: string
           user_id: string
@@ -82,6 +120,7 @@ export type Database = {
           email?: string
           full_name?: string | null
           id?: string
+          onboarding_completed?: boolean | null
           role?: string | null
           updated_at?: string
           user_id?: string
@@ -192,6 +231,27 @@ export type Database = {
         }
         Relationships: []
       }
+      user_roles: {
+        Row: {
+          created_at: string
+          id: string
+          role: Database["public"]["Enums"]["app_role"]
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          role?: Database["public"]["Enums"]["app_role"]
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          role?: Database["public"]["Enums"]["app_role"]
+          user_id?: string
+        }
+        Relationships: []
+      }
       workflows: {
         Row: {
           created_at: string
@@ -230,6 +290,18 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      accept_invitation: {
+        Args: { _token: string; _user_id: string }
+        Returns: boolean
+      }
+      has_role: {
+        Args: {
+          _role: Database["public"]["Enums"]["app_role"]
+          _user_id: string
+        }
+        Returns: boolean
+      }
+      is_admin_or_manager: { Args: { _user_id: string }; Returns: boolean }
       is_team_lead: {
         Args: { _team_id: string; _user_id: string }
         Returns: boolean
@@ -240,7 +312,7 @@ export type Database = {
       }
     }
     Enums: {
-      [_ in never]: never
+      app_role: "admin" | "manager" | "user"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -367,6 +439,8 @@ export type CompositeTypes<
 
 export const Constants = {
   public: {
-    Enums: {},
+    Enums: {
+      app_role: ["admin", "manager", "user"],
+    },
   },
 } as const
