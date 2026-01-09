@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
 import { useGoogleAuth } from "@/hooks/useGoogleAuth";
+import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 
 const steps = [
@@ -23,6 +24,8 @@ export default function Onboarding() {
   const [companySize, setCompanySize] = useState("");
   const [connectedIntegrations, setConnectedIntegrations] = useState<string[]>([]);
   const [inviteEmails, setInviteEmails] = useState("");
+  const [isGoogleUser, setIsGoogleUser] = useState(false);
+  const [isCheckingAuth, setIsCheckingAuth] = useState(true);
 
   const { 
     isConnecting, 
@@ -33,33 +36,55 @@ export default function Onboarding() {
     checkGoogleConnection 
   } = useGoogleAuth();
 
-  // Handle OAuth redirect
+  // Check if user signed up with Google and extract company info
   useEffect(() => {
-    const stepParam = searchParams.get("step");
-    const connectedParam = searchParams.get("connected");
-
-    if (stepParam) {
-      setCurrentStep(parseInt(stepParam));
-    }
-
-    if (connectedParam === "google") {
-      checkGoogleConnection().then((isConnected) => {
-        if (isConnected) {
-          setConnectedIntegrations((prev) => 
-            prev.includes("Google Workspace") ? prev : [...prev, "Google Workspace"]
-          );
-          toast.success("Google Workspace connecté avec succès !");
-          fetchGoogleUsers();
+    const checkAuthAndSetup = async () => {
+      setIsCheckingAuth(true);
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      if (user) {
+        const googleIdentity = user.identities?.find(
+          (identity) => identity.provider === "google"
+        );
+        
+        if (googleIdentity) {
+          setIsGoogleUser(true);
+          setConnectedIntegrations(["Google Workspace"]);
+          
+          // Extract company name from email domain (for Google Workspace users)
+          const email = user.email || "";
+          const domain = email.split("@")[1];
+          if (domain && !domain.includes("gmail.com") && !domain.includes("googlemail.com")) {
+            // Extract company name from domain (e.g., "acme.com" -> "Acme")
+            const companyFromDomain = domain.split(".")[0];
+            const formattedCompany = companyFromDomain.charAt(0).toUpperCase() + companyFromDomain.slice(1);
+            setCompanyName(formattedCompany);
+          }
+          
+          // If coming from Google signup, skip to step 1 (org info, but with prefilled data)
+          const fromGoogle = searchParams.get("from");
+          if (fromGoogle === "google") {
+            toast.success("Connecté avec Google !");
+            fetchGoogleUsers();
+          }
         }
-      });
-    }
+      }
+      setIsCheckingAuth(false);
+    };
+
+    checkAuthAndSetup();
   }, [searchParams]);
 
   const progress = (currentStep / steps.length) * 100;
 
   const handleNext = () => {
     if (currentStep < steps.length) {
-      setCurrentStep(currentStep + 1);
+      // If Google user, skip step 2 (integrations) since already connected
+      if (currentStep === 1 && isGoogleUser) {
+        setCurrentStep(3); // Skip to team invite
+      } else {
+        setCurrentStep(currentStep + 1);
+      }
     } else {
       navigate("/dashboard");
     }
@@ -67,7 +92,12 @@ export default function Onboarding() {
 
   const handleSkip = () => {
     if (currentStep < steps.length) {
-      setCurrentStep(currentStep + 1);
+      // If Google user on step 1, skip step 2
+      if (currentStep === 1 && isGoogleUser) {
+        setCurrentStep(3);
+      } else {
+        setCurrentStep(currentStep + 1);
+      }
     } else {
       navigate("/dashboard");
     }
