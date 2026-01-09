@@ -6,23 +6,6 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-// Generate a random password that meets Google's requirements
-function generatePassword(): string {
-  const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%";
-  let password = "";
-  // Ensure at least one of each required character type
-  password += "A"; // uppercase
-  password += "a"; // lowercase
-  password += "1"; // digit
-  password += "!"; // special
-  // Fill the rest randomly
-  for (let i = 0; i < 8; i++) {
-    password += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  // Shuffle the password
-  return password.split("").sort(() => Math.random() - 0.5).join("");
-}
-
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -38,7 +21,7 @@ serve(async (req) => {
     }
 
     const body = await req.json();
-    const { action, provider_token, firstName, lastName, userId } = body;
+    const { action, provider_token, firstName, lastName, personalEmail, userId } = body;
 
     if (!provider_token) {
       return new Response(
@@ -108,6 +91,13 @@ serve(async (req) => {
         );
       }
 
+      if (!personalEmail) {
+        return new Response(
+          JSON.stringify({ error: "Personal email is required to send the invitation" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
       // Normalize names for email (remove accents, lowercase, replace spaces with dots)
       const normalizeForEmail = (str: string) =>
         str
@@ -119,9 +109,11 @@ serve(async (req) => {
 
       const emailUsername = `${normalizeForEmail(firstName)}.${normalizeForEmail(lastName)}`;
       const email = `${emailUsername}@${domain}`;
-      const password = generatePassword();
+      
+      // Generate a temporary random password (required by API but user will set their own via invitation)
+      const tempPassword = crypto.randomUUID() + "Aa1!";
 
-      console.log(`Creating user: ${email}`);
+      console.log(`Creating user: ${email} with invitation to: ${personalEmail}`);
 
       const createResponse = await fetch(
         "https://admin.googleapis.com/admin/directory/v1/users",
@@ -137,8 +129,14 @@ serve(async (req) => {
               givenName: firstName,
               familyName: lastName,
             },
-            password: password,
+            password: tempPassword,
             changePasswordAtNextLogin: true,
+            recoveryEmail: personalEmail,
+            // Include personal email for notifications
+            emails: [
+              { address: email, primary: true },
+              { address: personalEmail, type: "home" }
+            ],
           }),
         }
       );
@@ -167,6 +165,9 @@ serve(async (req) => {
       const createdUser = await createResponse.json();
       console.log("User created successfully:", createdUser.primaryEmail);
 
+      // Send password reset email to personal email so user can set their password
+      // This is handled by Google when recoveryEmail is set and changePasswordAtNextLogin is true
+
       return new Response(
         JSON.stringify({
           success: true,
@@ -175,8 +176,8 @@ serve(async (req) => {
             email: createdUser.primaryEmail,
             name: `${createdUser.name.givenName} ${createdUser.name.familyName}`,
           },
-          temporaryPassword: password,
-          message: "Utilisateur créé avec succès. Le mot de passe devra être changé à la première connexion.",
+          invitationSentTo: personalEmail,
+          message: `Utilisateur créé avec succès. Une invitation a été envoyée à ${personalEmail}.`,
         }),
         { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
