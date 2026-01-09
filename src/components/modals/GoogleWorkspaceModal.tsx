@@ -32,7 +32,7 @@ interface GoogleWorkspaceModalProps {
 export function GoogleWorkspaceModal({ open, onOpenChange, onDisconnect }: GoogleWorkspaceModalProps) {
   const [search, setSearch] = useState("");
   const [confirmDisconnectOpen, setConfirmDisconnectOpen] = useState(false);
-  const { fetchGoogleUsers, googleUsers, isLoadingUsers, error } = useGoogleAuth();
+  const { fetchGoogleUsers, disconnectGoogle, googleUsers, isLoadingUsers, isDisconnecting, error } = useGoogleAuth();
 
   useEffect(() => {
     if (open) {
@@ -40,10 +40,13 @@ export function GoogleWorkspaceModal({ open, onOpenChange, onDisconnect }: Googl
     }
   }, [open]);
 
-  const handleDisconnect = () => {
+  const handleDisconnect = async () => {
+    const result = await disconnectGoogle();
     setConfirmDisconnectOpen(false);
     onOpenChange(false);
-    onDisconnect?.();
+    if (result.success) {
+      onDisconnect?.();
+    }
   };
 
   const filteredUsers = googleUsers.filter(user =>
@@ -155,9 +158,10 @@ export function GoogleWorkspaceModal({ open, onOpenChange, onDisconnect }: Googl
           <Button 
             variant="destructive" 
             onClick={() => setConfirmDisconnectOpen(true)}
+            disabled={isDisconnecting}
           >
-            <Unlink className="h-4 w-4" />
-            Déconnecter
+            {isDisconnecting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Unlink className="h-4 w-4" />}
+            {isDisconnecting ? "Déconnexion..." : "Déconnecter"}
           </Button>
           <div className="flex gap-2">
             <Button variant="outline" onClick={() => onOpenChange(false)}>
