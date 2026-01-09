@@ -1,12 +1,15 @@
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { Check, ArrowRight, Building2, Users, Mail, Loader2 } from "lucide-react";
+import { Check, ArrowRight, Building2, Users, Mail, Loader2, Copy, CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
-import { useGoogleAuth } from "@/hooks/useGoogleAuth";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { useGoogleAuth, GoogleUser } from "@/hooks/useGoogleAuth";
+import { useUserProfile } from "@/hooks/useUserProfile";
+import { useInvitations } from "@/hooks/useInvitations";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 
@@ -16,6 +19,11 @@ const steps = [
   { id: 3, name: "Équipe", description: "Invitez vos collaborateurs" },
 ];
 
+interface UserToInvite extends GoogleUser {
+  selectedRole: 'admin' | 'manager' | 'user';
+  isInvited: boolean;
+}
+
 export default function Onboarding() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -24,8 +32,12 @@ export default function Onboarding() {
   const [companySize, setCompanySize] = useState("");
   const [connectedIntegrations, setConnectedIntegrations] = useState<string[]>([]);
   const [inviteEmails, setInviteEmails] = useState("");
+  const [emailRole, setEmailRole] = useState<'admin' | 'manager' | 'user'>('user');
   const [isGoogleUser, setIsGoogleUser] = useState(false);
   const [isCheckingAuth, setIsCheckingAuth] = useState(true);
+  const [usersToInvite, setUsersToInvite] = useState<UserToInvite[]>([]);
+  const [isInviting, setIsInviting] = useState(false);
+  const [copiedToken, setCopiedToken] = useState<string | null>(null);
 
   const { 
     isConnecting, 
@@ -33,8 +45,10 @@ export default function Onboarding() {
     googleUsers, 
     connectGoogle, 
     fetchGoogleUsers,
-    checkGoogleConnection 
   } = useGoogleAuth();
+
+  const { completeOnboarding } = useUserProfile();
+  const { createBulkInvitations, getInvitationLink, createInvitation } = useInvitations();
 
   // Check if user signed up with Google and extract company info
   useEffect(() => {
@@ -51,54 +65,66 @@ export default function Onboarding() {
           setIsGoogleUser(true);
           setConnectedIntegrations(["Google Workspace"]);
           
-          // Extract company name from email domain (for Google Workspace users)
+          // Extract company name from email domain
           const email = user.email || "";
           const domain = email.split("@")[1];
           if (domain && !domain.includes("gmail.com") && !domain.includes("googlemail.com")) {
-            // Extract company name from domain (e.g., "acme.com" -> "Acme")
             const companyFromDomain = domain.split(".")[0];
             const formattedCompany = companyFromDomain.charAt(0).toUpperCase() + companyFromDomain.slice(1);
             setCompanyName(formattedCompany);
           }
           
-          // If coming from Google signup, skip to step 1 (org info, but with prefilled data)
-          const fromGoogle = searchParams.get("from");
-          if (fromGoogle === "google") {
-            toast.success("Connecté avec Google !");
-            fetchGoogleUsers();
-          }
+          // Fetch Google users
+          fetchGoogleUsers();
         }
       }
       setIsCheckingAuth(false);
     };
 
     checkAuthAndSetup();
-  }, [searchParams]);
+  }, []);
+
+  // Convert Google users to invitable users
+  useEffect(() => {
+    if (googleUsers.length > 0) {
+      setUsersToInvite(
+        googleUsers
+          .filter(u => !u.isCurrentUser) // Exclude current user
+          .map(u => ({
+            ...u,
+            selectedRole: 'user' as const,
+            isInvited: false,
+          }))
+      );
+    }
+  }, [googleUsers]);
 
   const progress = (currentStep / steps.length) * 100;
 
-  const handleNext = () => {
+  const handleNext = async () => {
     if (currentStep < steps.length) {
       // If Google user, skip step 2 (integrations) since already connected
-      if (currentStep === 1 && isGoogleUser) {
-        setCurrentStep(3); // Skip to team invite
-      } else {
-        setCurrentStep(currentStep + 1);
-      }
-    } else {
-      navigate("/dashboard");
-    }
-  };
-
-  const handleSkip = () => {
-    if (currentStep < steps.length) {
-      // If Google user on step 1, skip step 2
       if (currentStep === 1 && isGoogleUser) {
         setCurrentStep(3);
       } else {
         setCurrentStep(currentStep + 1);
       }
     } else {
+      // Complete onboarding
+      await completeOnboarding();
+      navigate("/dashboard");
+    }
+  };
+
+  const handleSkip = async () => {
+    if (currentStep < steps.length) {
+      if (currentStep === 1 && isGoogleUser) {
+        setCurrentStep(3);
+      } else {
+        setCurrentStep(currentStep + 1);
+      }
+    } else {
+      await completeOnboarding();
       navigate("/dashboard");
     }
   };
@@ -106,10 +132,8 @@ export default function Onboarding() {
   const handleIntegrationClick = async (name: string) => {
     if (name === "Google Workspace") {
       if (connectedIntegrations.includes(name)) {
-        // Already connected - fetch users
         fetchGoogleUsers();
       } else {
-        // Connect Google - redirect back to onboarding step 2
         await connectGoogle("/onboarding?step=2&connected=google");
       }
     } else if (name === "Microsoft 365") {
@@ -117,6 +141,82 @@ export default function Onboarding() {
     } else if (name === "Slack") {
       toast.info("L'intégration Slack sera bientôt disponible.");
     }
+  };
+
+  const handleRoleChange = (userId: string, role: 'admin' | 'manager' | 'user') => {
+    setUsersToInvite(prev =>
+      prev.map(u => u.id === userId ? { ...u, selectedRole: role } : u)
+    );
+  };
+
+  const handleInviteUser = async (user: UserToInvite) => {
+    setIsInviting(true);
+    const { invitation, error } = await createInvitation({
+      email: user.email,
+      role: user.selectedRole,
+    });
+
+    if (error) {
+      toast.error(`Erreur: ${error}`);
+    } else if (invitation) {
+      setUsersToInvite(prev =>
+        prev.map(u => u.id === user.id ? { ...u, isInvited: true } : u)
+      );
+      toast.success(`Invitation envoyée à ${user.email}`);
+    }
+    setIsInviting(false);
+  };
+
+  const handleCopyLink = async (user: UserToInvite) => {
+    // First create invitation if not already invited
+    if (!user.isInvited) {
+      const { invitation, error } = await createInvitation({
+        email: user.email,
+        role: user.selectedRole,
+      });
+
+      if (error) {
+        toast.error(`Erreur: ${error}`);
+        return;
+      }
+
+      if (invitation) {
+        setUsersToInvite(prev =>
+          prev.map(u => u.id === user.id ? { ...u, isInvited: true } : u)
+        );
+        
+        const link = getInvitationLink(invitation.token);
+        await navigator.clipboard.writeText(link);
+        setCopiedToken(user.id);
+        toast.success("Lien copié !");
+        setTimeout(() => setCopiedToken(null), 2000);
+      }
+    }
+  };
+
+  const handleInviteFromEmails = async () => {
+    const emails = inviteEmails
+      .split(/[,\n]/)
+      .map(e => e.trim())
+      .filter(e => e.length > 0 && e.includes("@"));
+
+    if (emails.length === 0) {
+      toast.error("Veuillez entrer au moins une adresse email valide.");
+      return;
+    }
+
+    setIsInviting(true);
+    const payloads = emails.map(email => ({ email, role: emailRole }));
+    const result = await createBulkInvitations(payloads);
+
+    if (result.success > 0) {
+      toast.success(`${result.success} invitation(s) envoyée(s)`);
+      setInviteEmails("");
+    }
+    if (result.errors.length > 0) {
+      result.errors.forEach(err => toast.error(err));
+    }
+    setIsInviting(false);
   };
 
   const integrations = [
@@ -165,6 +265,12 @@ export default function Onboarding() {
     { value: "201-500", label: "201-500 employés" },
     { value: "500+", label: "500+ employés" },
   ];
+
+  const roleLabels = {
+    admin: "Admin",
+    manager: "Manager",
+    user: "Utilisateur",
+  };
 
   return (
     <div className="min-h-screen bg-background flex">
@@ -398,12 +504,12 @@ export default function Onboarding() {
                       <Users className="h-6 w-6" />
                     </div>
                     <h1 className="font-display text-display-md text-foreground mb-2">
-                      {isGoogleUser ? "Votre équipe" : "Invitez votre équipe"}
+                      Invitez votre équipe
                     </h1>
                     <p className="text-body-md text-muted-foreground">
                       {isGoogleUser 
-                        ? "Voici les membres de votre organisation Google Workspace."
-                        : "Collaborez avec vos collègues dès le départ."}
+                        ? "Sélectionnez les membres à inviter et leur rôle."
+                        : "Invitez vos collaborateurs par email."}
                     </p>
                   </div>
 
@@ -414,12 +520,16 @@ export default function Onboarding() {
                           <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
                           <span className="ml-2 text-sm text-muted-foreground">Chargement des utilisateurs...</span>
                         </div>
-                      ) : googleUsers.length > 0 ? (
-                        <div className="space-y-2 max-h-[300px] overflow-y-auto pr-2">
-                          {googleUsers.map((user) => (
+                      ) : usersToInvite.length > 0 ? (
+                        <div className="space-y-2 max-h-[350px] overflow-y-auto pr-2">
+                          {usersToInvite.map((user) => (
                             <div 
                               key={user.id} 
-                              className="flex items-center gap-3 p-3 rounded-lg border border-border bg-background hover:bg-accent/50 transition-colors"
+                              className={`flex items-center gap-3 p-3 rounded-lg border transition-colors ${
+                                user.isInvited 
+                                  ? "border-primary/50 bg-primary/5" 
+                                  : "border-border bg-background hover:bg-accent/50"
+                              }`}
                             >
                               {user.avatar ? (
                                 <img
@@ -437,23 +547,66 @@ export default function Onboarding() {
                               <div className="flex-1 min-w-0">
                                 <p className="text-sm font-medium text-foreground truncate">
                                   {user.name}
-                                  {user.isCurrentUser && (
-                                    <span className="ml-2 text-xs bg-primary/10 text-primary px-2 py-0.5 rounded-full">(vous)</span>
-                                  )}
                                 </p>
                                 <p className="text-xs text-muted-foreground truncate">{user.email}</p>
                               </div>
+                              
+                              {user.isInvited ? (
+                                <div className="flex items-center gap-2 text-primary">
+                                  <CheckCircle2 className="h-4 w-4" />
+                                  <span className="text-xs font-medium">Invité</span>
+                                </div>
+                              ) : (
+                                <div className="flex items-center gap-2">
+                                  <Select
+                                    value={user.selectedRole}
+                                    onValueChange={(val) => handleRoleChange(user.id, val as 'admin' | 'manager' | 'user')}
+                                  >
+                                    <SelectTrigger className="w-[110px] h-8 text-xs">
+                                      <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="user">Utilisateur</SelectItem>
+                                      <SelectItem value="manager">Manager</SelectItem>
+                                      <SelectItem value="admin">Admin</SelectItem>
+                                    </SelectContent>
+                                  </Select>
+                                  
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-8 px-2"
+                                    onClick={() => handleCopyLink(user)}
+                                    disabled={isInviting}
+                                  >
+                                    {copiedToken === user.id ? (
+                                      <Check className="h-3.5 w-3.5" />
+                                    ) : (
+                                      <Copy className="h-3.5 w-3.5" />
+                                    )}
+                                  </Button>
+                                  
+                                  <Button
+                                    size="sm"
+                                    className="h-8"
+                                    onClick={() => handleInviteUser(user)}
+                                    disabled={isInviting}
+                                  >
+                                    Inviter
+                                  </Button>
+                                </div>
+                              )}
                             </div>
                           ))}
                         </div>
                       ) : (
                         <div className="text-center py-8 text-muted-foreground">
                           <Users className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                          <p className="text-sm">Aucun utilisateur trouvé</p>
+                          <p className="text-sm">Aucun autre utilisateur dans votre organisation</p>
                         </div>
                       )}
                       <p className="text-xs text-muted-foreground text-center mt-4">
-                        {googleUsers.length} membre{googleUsers.length > 1 ? "s" : ""} dans votre organisation
+                        {usersToInvite.filter(u => u.isInvited).length} invitation(s) envoyée(s)
                       </p>
                     </div>
                   ) : (
@@ -473,6 +626,29 @@ export default function Onboarding() {
                         <p className="text-xs text-muted-foreground">
                           Séparez les adresses par des virgules ou des retours à la ligne.
                         </p>
+                      </div>
+
+                      <div className="flex items-center gap-4">
+                        <div className="flex-1">
+                          <Label htmlFor="role">Rôle par défaut</Label>
+                          <Select value={emailRole} onValueChange={(val) => setEmailRole(val as 'admin' | 'manager' | 'user')}>
+                            <SelectTrigger className="mt-1.5">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="user">Utilisateur</SelectItem>
+                              <SelectItem value="manager">Manager</SelectItem>
+                              <SelectItem value="admin">Admin</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <Button 
+                          onClick={handleInviteFromEmails} 
+                          disabled={isInviting || !inviteEmails.trim()}
+                          className="mt-6"
+                        >
+                          {isInviting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Envoyer"}
+                        </Button>
                       </div>
                     </div>
                   )}

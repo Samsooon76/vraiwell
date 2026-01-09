@@ -48,8 +48,9 @@ export default function Login() {
       const { error } = await supabase.auth.signInWithOAuth({
         provider: "google",
         options: {
-          redirectTo: `${window.location.origin}/onboarding?from=google`,
-          scopes: "email profile",
+          // Redirect to dashboard - the ProtectedRoute will handle onboarding check
+          redirectTo: `${window.location.origin}/dashboard`,
+          scopes: "email profile https://www.googleapis.com/auth/admin.directory.user.readonly",
         },
       });
       if (error) throw error;
