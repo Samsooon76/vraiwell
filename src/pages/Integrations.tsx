@@ -83,7 +83,8 @@ export default function Integrations() {
 
   const handleConnectGoogle = async () => {
     try {
-      await connectGoogle();
+      // Redirect back to integrations page after OAuth
+      await connectGoogle("/dashboard/integrations");
     } catch (error) {
       toast.error("Erreur de connexion Google");
     }

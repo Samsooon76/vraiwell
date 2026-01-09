@@ -109,8 +109,8 @@ export default function Onboarding() {
         // Already connected - fetch users
         fetchGoogleUsers();
       } else {
-        // Connect Google
-        await connectGoogle();
+        // Connect Google - redirect back to onboarding step 2
+        await connectGoogle("/onboarding?step=2&connected=google");
       }
     } else if (name === "Microsoft 365") {
       toast.info("L'intégration Microsoft 365 sera bientôt disponible.");
