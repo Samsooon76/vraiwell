@@ -9,6 +9,17 @@ export interface GoogleUser {
   isCurrentUser?: boolean;
 }
 
+export interface CreateGoogleUserResult {
+  success: boolean;
+  user?: {
+    id: string;
+    email: string;
+    name: string;
+  };
+  temporaryPassword?: string;
+  error?: string;
+}
+
 const PROVIDER_TOKEN_KEY = "google_provider_token";
 
 const GOOGLE_DISABLED_KEY = "google_workspace_disabled";
@@ -19,6 +30,8 @@ export function useGoogleAuth() {
   const [googleUsers, setGoogleUsers] = useState<GoogleUser[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [isDisconnecting, setIsDisconnecting] = useState(false);
+  const [isCreatingUser, setIsCreatingUser] = useState(false);
+  const [isDeletingUser, setIsDeletingUser] = useState(false);
 
   // Listen for auth changes and save provider_token when available
   useEffect(() => {
@@ -47,7 +60,7 @@ export function useGoogleAuth() {
         provider: "google",
         options: {
           redirectTo: `${window.location.origin}${finalRedirect}`,
-          scopes: "email profile https://www.googleapis.com/auth/admin.directory.user.readonly",
+          scopes: "email profile https://www.googleapis.com/auth/admin.directory.user.readonly https://www.googleapis.com/auth/admin.directory.user",
         },
       });
 
@@ -164,15 +177,132 @@ export function useGoogleAuth() {
     return !!googleIdentity;
   };
 
+  const createGoogleUser = async (firstName: string, lastName: string): Promise<CreateGoogleUserResult> => {
+    setIsCreatingUser(true);
+    setError(null);
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      if (!session) {
+        throw new Error("No active session");
+      }
+
+      let providerToken = session.provider_token;
+      if (!providerToken) {
+        providerToken = sessionStorage.getItem(PROVIDER_TOKEN_KEY);
+      }
+
+      if (!providerToken) {
+        throw new Error("Reconnexion nécessaire pour gérer les utilisateurs.");
+      }
+
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/manage-google-user`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${session.access_token}`,
+          },
+          body: JSON.stringify({ 
+            action: "create",
+            provider_token: providerToken,
+            firstName,
+            lastName,
+          }),
+        }
+      );
+
+      const data = await response.json();
+
+      if (data.error) {
+        throw new Error(data.error);
+      }
+
+      // Refresh user list
+      await fetchGoogleUsers();
+
+      return {
+        success: true,
+        user: data.user,
+        temporaryPassword: data.temporaryPassword,
+      };
+    } catch (err: any) {
+      setError(err.message);
+      return { success: false, error: err.message };
+    } finally {
+      setIsCreatingUser(false);
+    }
+  };
+
+  const deleteGoogleUser = async (userId: string): Promise<{ success: boolean; error?: string }> => {
+    setIsDeletingUser(true);
+    setError(null);
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      if (!session) {
+        throw new Error("No active session");
+      }
+
+      let providerToken = session.provider_token;
+      if (!providerToken) {
+        providerToken = sessionStorage.getItem(PROVIDER_TOKEN_KEY);
+      }
+
+      if (!providerToken) {
+        throw new Error("Reconnexion nécessaire pour gérer les utilisateurs.");
+      }
+
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/manage-google-user`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${session.access_token}`,
+          },
+          body: JSON.stringify({ 
+            action: "delete",
+            provider_token: providerToken,
+            userId,
+          }),
+        }
+      );
+
+      const data = await response.json();
+
+      if (data.error) {
+        throw new Error(data.error);
+      }
+
+      // Remove user from local state
+      setGoogleUsers(prev => prev.filter(u => u.id !== userId));
+
+      return { success: true };
+    } catch (err: any) {
+      setError(err.message);
+      return { success: false, error: err.message };
+    } finally {
+      setIsDeletingUser(false);
+    }
+  };
+
   return {
     isConnecting,
     isDisconnecting,
     isLoadingUsers,
+    isCreatingUser,
+    isDeletingUser,
     googleUsers,
     error,
     connectGoogle,
     disconnectGoogle,
     fetchGoogleUsers,
     checkGoogleConnection,
+    createGoogleUser,
+    deleteGoogleUser,
   };
 }

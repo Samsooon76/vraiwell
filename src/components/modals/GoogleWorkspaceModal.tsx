@@ -10,7 +10,12 @@ import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useGoogleAuth, GoogleUser } from "@/hooks/useGoogleAuth";
+import { useUserProfile } from "@/hooks/useUserProfile";
+import { useInvitations } from "@/hooks/useInvitations";
 import { 
   Users, 
   Search, 
@@ -19,9 +24,15 @@ import {
   Mail,
   Shield,
   AlertCircle,
-  Unlink
+  Unlink,
+  UserPlus,
+  Trash2,
+  Copy,
+  Check,
+  X
 } from "lucide-react";
 import { ConfirmModal } from "./ConfirmModal";
+import { toast } from "sonner";
 
 interface GoogleWorkspaceModalProps {
   open: boolean;
@@ -32,7 +43,30 @@ interface GoogleWorkspaceModalProps {
 export function GoogleWorkspaceModal({ open, onOpenChange, onDisconnect }: GoogleWorkspaceModalProps) {
   const [search, setSearch] = useState("");
   const [confirmDisconnectOpen, setConfirmDisconnectOpen] = useState(false);
-  const { fetchGoogleUsers, disconnectGoogle, googleUsers, isLoadingUsers, isDisconnecting, error } = useGoogleAuth();
+  const [showAddUserForm, setShowAddUserForm] = useState(false);
+  const [newUserFirstName, setNewUserFirstName] = useState("");
+  const [newUserLastName, setNewUserLastName] = useState("");
+  const [autoInvite, setAutoInvite] = useState(false);
+  const [inviteRole, setInviteRole] = useState<"admin" | "manager" | "user">("user");
+  const [userToDelete, setUserToDelete] = useState<GoogleUser | null>(null);
+  const [createdUserPassword, setCreatedUserPassword] = useState<string | null>(null);
+  const [copiedPassword, setCopiedPassword] = useState(false);
+
+  const { 
+    fetchGoogleUsers, 
+    disconnectGoogle, 
+    createGoogleUser,
+    deleteGoogleUser,
+    googleUsers, 
+    isLoadingUsers, 
+    isDisconnecting, 
+    isCreatingUser,
+    isDeletingUser,
+    error 
+  } = useGoogleAuth();
+  
+  const { isAdmin } = useUserProfile();
+  const { createInvitation } = useInvitations();
 
   useEffect(() => {
     if (open) {
@@ -49,14 +83,83 @@ export function GoogleWorkspaceModal({ open, onOpenChange, onDisconnect }: Googl
     }
   };
 
+  const handleCreateUser = async () => {
+    if (!newUserFirstName.trim() || !newUserLastName.trim()) {
+      toast.error("Veuillez remplir le prénom et le nom");
+      return;
+    }
+
+    const result = await createGoogleUser(newUserFirstName.trim(), newUserLastName.trim());
+
+    if (result.success && result.user) {
+      toast.success(`Utilisateur ${result.user.email} créé avec succès`);
+      setCreatedUserPassword(result.temporaryPassword || null);
+      
+      if (autoInvite && result.user.email) {
+        const inviteResult = await createInvitation({ email: result.user.email, role: inviteRole });
+        if (inviteResult.invitation) {
+          toast.success(`Invitation envoyée à ${result.user.email}`);
+        }
+      }
+
+      if (!result.temporaryPassword) {
+        resetAddUserForm();
+      }
+    } else {
+      toast.error(result.error || "Erreur lors de la création");
+    }
+  };
+
+  const handleDeleteUser = async () => {
+    if (!userToDelete) return;
+
+    const result = await deleteGoogleUser(userToDelete.id);
+
+    if (result.success) {
+      toast.success(`Utilisateur ${userToDelete.email} supprimé de Google Workspace`);
+    } else {
+      toast.error(result.error || "Erreur lors de la suppression");
+    }
+
+    setUserToDelete(null);
+  };
+
+  const resetAddUserForm = () => {
+    setShowAddUserForm(false);
+    setNewUserFirstName("");
+    setNewUserLastName("");
+    setAutoInvite(false);
+    setInviteRole("user");
+    setCreatedUserPassword(null);
+    setCopiedPassword(false);
+  };
+
+  const copyPassword = async () => {
+    if (createdUserPassword) {
+      await navigator.clipboard.writeText(createdUserPassword);
+      setCopiedPassword(true);
+      toast.success("Mot de passe copié");
+      setTimeout(() => setCopiedPassword(false), 2000);
+    }
+  };
+
   const filteredUsers = googleUsers.filter(user =>
     user.name.toLowerCase().includes(search.toLowerCase()) ||
     user.email.toLowerCase().includes(search.toLowerCase())
   );
 
+  // Extract domain from first user email
+  const domain = googleUsers[0]?.email?.split("@")[1] || "domaine.fr";
+  const previewEmail = newUserFirstName && newUserLastName 
+    ? `${newUserFirstName.toLowerCase().replace(/\s+/g, ".")}.${newUserLastName.toLowerCase().replace(/\s+/g, ".")}@${domain}`
+    : "";
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[550px]">
+    <Dialog open={open} onOpenChange={(isOpen) => {
+      if (!isOpen) resetAddUserForm();
+      onOpenChange(isOpen);
+    }}>
+      <DialogContent className="sm:max-w-[600px]">
         <DialogHeader>
           <DialogTitle className="font-display text-xl flex items-center gap-2">
             <Users className="h-5 w-5 text-primary" />
@@ -68,6 +171,133 @@ export function GoogleWorkspaceModal({ open, onOpenChange, onDisconnect }: Googl
         </DialogHeader>
 
         <div className="space-y-4 mt-4">
+          {/* Password display after creation */}
+          {createdUserPassword && (
+            <div className="rounded-lg border border-green-500/50 bg-green-500/10 p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex-1">
+                  <p className="text-sm font-medium text-green-700 dark:text-green-400">
+                    Utilisateur créé avec succès !
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Mot de passe temporaire (à changer à la première connexion) :
+                  </p>
+                  <code className="block mt-2 bg-background rounded px-3 py-2 text-sm font-mono">
+                    {createdUserPassword}
+                  </code>
+                </div>
+                <div className="flex gap-2">
+                  <Button 
+                    size="sm" 
+                    variant="outline"
+                    onClick={copyPassword}
+                  >
+                    {copiedPassword ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                  </Button>
+                  <Button 
+                    size="sm" 
+                    variant="ghost"
+                    onClick={resetAddUserForm}
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Add user form for admins */}
+          {isAdmin && !createdUserPassword && (
+            <>
+              {showAddUserForm ? (
+                <div className="rounded-lg border border-border p-4 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-sm font-medium">Nouvel utilisateur</h4>
+                    <Button variant="ghost" size="sm" onClick={resetAddUserForm}>
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-2">
+                      <Label htmlFor="firstName">Prénom</Label>
+                      <Input
+                        id="firstName"
+                        placeholder="Jean"
+                        value={newUserFirstName}
+                        onChange={(e) => setNewUserFirstName(e.target.value)}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="lastName">Nom</Label>
+                      <Input
+                        id="lastName"
+                        placeholder="Dupont"
+                        value={newUserLastName}
+                        onChange={(e) => setNewUserLastName(e.target.value)}
+                      />
+                    </div>
+                  </div>
+
+                  {previewEmail && (
+                    <p className="text-xs text-muted-foreground">
+                      Email : <span className="font-mono">{previewEmail}</span>
+                    </p>
+                  )}
+
+                  <div className="flex items-center space-x-2">
+                    <Checkbox
+                      id="autoInvite"
+                      checked={autoInvite}
+                      onCheckedChange={(checked) => setAutoInvite(checked === true)}
+                    />
+                    <Label htmlFor="autoInvite" className="text-sm">
+                      Inviter automatiquement dans l'application
+                    </Label>
+                  </div>
+
+                  {autoInvite && (
+                    <div className="space-y-2">
+                      <Label>Rôle</Label>
+                      <Select value={inviteRole} onValueChange={(v) => setInviteRole(v as typeof inviteRole)}>
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="admin">Admin</SelectItem>
+                          <SelectItem value="manager">Manager</SelectItem>
+                          <SelectItem value="user">Utilisateur</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+
+                  <Button 
+                    onClick={handleCreateUser} 
+                    disabled={isCreatingUser || !newUserFirstName.trim() || !newUserLastName.trim()}
+                    className="w-full"
+                  >
+                    {isCreatingUser ? (
+                      <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                    ) : (
+                      <UserPlus className="h-4 w-4 mr-2" />
+                    )}
+                    Créer l'utilisateur
+                  </Button>
+                </div>
+              ) : (
+                <Button 
+                  variant="outline" 
+                  onClick={() => setShowAddUserForm(true)}
+                  className="w-full"
+                >
+                  <UserPlus className="h-4 w-4 mr-2" />
+                  Ajouter un utilisateur
+                </Button>
+              )}
+            </>
+          )}
+
           {/* Search */}
           <div className="relative">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -80,7 +310,7 @@ export function GoogleWorkspaceModal({ open, onOpenChange, onDisconnect }: Googl
           </div>
 
           {/* Users list */}
-          <div className="max-h-[350px] overflow-y-auto space-y-2">
+          <div className="max-h-[300px] overflow-y-auto space-y-2">
             {isLoadingUsers ? (
               <div className="flex flex-col items-center justify-center py-12">
                 <Loader2 className="h-8 w-8 animate-spin text-primary mb-3" />
@@ -110,7 +340,7 @@ export function GoogleWorkspaceModal({ open, onOpenChange, onDisconnect }: Googl
               filteredUsers.map((user) => (
                 <div
                   key={user.id}
-                  className="flex items-center gap-3 rounded-lg border border-border p-3 hover:bg-accent/50 transition-colors"
+                  className="flex items-center gap-3 rounded-lg border border-border p-3 hover:bg-accent/50 transition-colors group"
                 >
                   <Avatar className="h-10 w-10">
                     <AvatarImage src={user.avatar} alt={user.name} />
@@ -135,6 +365,16 @@ export function GoogleWorkspaceModal({ open, onOpenChange, onDisconnect }: Googl
                       {user.email}
                     </p>
                   </div>
+                  {isAdmin && !user.isCurrentUser && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="opacity-0 group-hover:opacity-100 transition-opacity text-destructive hover:text-destructive hover:bg-destructive/10"
+                      onClick={() => setUserToDelete(user)}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  )}
                 </div>
               ))
             )}
@@ -146,8 +386,8 @@ export function GoogleWorkspaceModal({ open, onOpenChange, onDisconnect }: Googl
               <p className="flex items-start gap-2">
                 <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
                 <span>
-                  Pour lister tous les utilisateurs de votre organisation, vous devez être administrateur 
-                  Google Workspace et activer l'API Admin Directory.
+                  Pour gérer les utilisateurs, vous devez être administrateur 
+                  Google Workspace avec les permissions Directory API.
                 </span>
               </p>
             </div>
@@ -183,6 +423,17 @@ export function GoogleWorkspaceModal({ open, onOpenChange, onDisconnect }: Googl
         confirmText="Déconnecter"
         variant="destructive"
         onConfirm={handleDisconnect}
+      />
+
+      <ConfirmModal
+        open={!!userToDelete}
+        onOpenChange={(open) => !open && setUserToDelete(null)}
+        title="Supprimer l'utilisateur"
+        description={`Êtes-vous sûr de vouloir supprimer ${userToDelete?.name} (${userToDelete?.email}) de Google Workspace ? Cette action est irréversible.`}
+        confirmText="Supprimer"
+        variant="destructive"
+        onConfirm={handleDeleteUser}
+        isLoading={isDeletingUser}
       />
     </Dialog>
   );
