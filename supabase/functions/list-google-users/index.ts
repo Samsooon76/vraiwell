@@ -20,7 +20,16 @@ serve(async (req) => {
       );
     }
 
-    // Create Supabase client with user's token
+    // Parse request body to get provider_token from frontend
+    let providerToken: string | null = null;
+    try {
+      const body = await req.json();
+      providerToken = body.provider_token;
+    } catch {
+      // No body or invalid JSON
+    }
+
+    // Create Supabase client
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseKey);
@@ -51,21 +60,75 @@ serve(async (req) => {
     }
 
     const googleUserData = googleIdentity.identity_data;
-    
-    const users = [
-      {
-        id: user.id,
-        email: googleUserData?.email || user.email,
-        name: googleUserData?.full_name || googleUserData?.name || "Unknown",
-        avatar: googleUserData?.avatar_url || googleUserData?.picture,
-        isCurrentUser: true,
-      }
-    ];
+    const currentUser = {
+      id: user.id,
+      email: googleUserData?.email || user.email,
+      name: googleUserData?.full_name || googleUserData?.name || "Unknown",
+      avatar: googleUserData?.avatar_url || googleUserData?.picture,
+      isCurrentUser: true,
+    };
 
+    // If we have a provider token, fetch workspace users via Google Directory API
+    if (providerToken) {
+      const domain = googleUserData?.email?.split("@")[1];
+      
+      if (domain) {
+        console.log("Fetching users for domain:", domain);
+
+        const directoryResponse = await fetch(
+          `https://admin.googleapis.com/admin/directory/v1/users?domain=${domain}&maxResults=100`,
+          {
+            headers: {
+              Authorization: `Bearer ${providerToken}`,
+              "Content-Type": "application/json",
+            },
+          }
+        );
+
+        console.log("Directory API response status:", directoryResponse.status);
+
+        if (directoryResponse.ok) {
+          const directoryData = await directoryResponse.json();
+          console.log("Directory API returned", directoryData.users?.length || 0, "users");
+
+          const workspaceUsers = (directoryData.users || []).map((gUser: any) => ({
+            id: gUser.id,
+            email: gUser.primaryEmail,
+            name: gUser.name?.fullName || gUser.primaryEmail,
+            avatar: gUser.thumbnailPhotoUrl,
+            isCurrentUser: gUser.primaryEmail === googleUserData?.email,
+          }));
+
+          return new Response(
+            JSON.stringify({ success: true, users: workspaceUsers, domain }),
+            { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        } else {
+          const errorText = await directoryResponse.text();
+          console.error("Directory API error:", directoryResponse.status, errorText);
+          
+          return new Response(
+            JSON.stringify({ 
+              success: false, 
+              users: [currentUser],
+              error: directoryResponse.status === 403 
+                ? "Accès refusé. Reconnectez-vous pour autoriser l'accès aux utilisateurs."
+                : "Erreur lors de la récupération des utilisateurs.",
+              needsReconnect: true,
+            }),
+            { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+      }
+    }
+
+    // Fallback: return only current user
     return new Response(
       JSON.stringify({ 
         success: true, 
-        users,
+        users: [currentUser],
+        needsReconnect: true,
+        message: "Reconnectez-vous pour accéder aux utilisateurs du workspace.",
       }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
