@@ -1,3 +1,4 @@
+import { Loader2 } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -18,6 +19,7 @@ interface ConfirmModalProps {
   cancelText?: string;
   variant?: "default" | "destructive";
   onConfirm: () => void;
+  isLoading?: boolean;
 }
 
 export function ConfirmModal({
@@ -29,6 +31,7 @@ export function ConfirmModal({
   cancelText = "Annuler",
   variant = "default",
   onConfirm,
+  isLoading = false,
 }: ConfirmModalProps) {
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
@@ -38,11 +41,13 @@ export function ConfirmModal({
           <AlertDialogDescription>{description}</AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel>{cancelText}</AlertDialogCancel>
+          <AlertDialogCancel disabled={isLoading}>{cancelText}</AlertDialogCancel>
           <AlertDialogAction
             onClick={onConfirm}
+            disabled={isLoading}
             className={variant === "destructive" ? "bg-destructive text-destructive-foreground hover:bg-destructive/90" : ""}
           >
+            {isLoading && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
             {confirmText}
           </AlertDialogAction>
         </AlertDialogFooter>
