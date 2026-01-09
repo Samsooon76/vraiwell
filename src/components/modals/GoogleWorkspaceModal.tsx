@@ -27,9 +27,9 @@ import {
   Unlink,
   UserPlus,
   Trash2,
-  Copy,
   Check,
-  X
+  X,
+  CreditCard
 } from "lucide-react";
 import { ConfirmModal } from "./ConfirmModal";
 import { toast } from "sonner";
@@ -46,11 +46,11 @@ export function GoogleWorkspaceModal({ open, onOpenChange, onDisconnect }: Googl
   const [showAddUserForm, setShowAddUserForm] = useState(false);
   const [newUserFirstName, setNewUserFirstName] = useState("");
   const [newUserLastName, setNewUserLastName] = useState("");
+  const [newUserPersonalEmail, setNewUserPersonalEmail] = useState("");
   const [autoInvite, setAutoInvite] = useState(false);
   const [inviteRole, setInviteRole] = useState<"admin" | "manager" | "user">("user");
   const [userToDelete, setUserToDelete] = useState<GoogleUser | null>(null);
-  const [createdUserPassword, setCreatedUserPassword] = useState<string | null>(null);
-  const [copiedPassword, setCopiedPassword] = useState(false);
+  const [invitationSentTo, setInvitationSentTo] = useState<string | null>(null);
 
   const { 
     fetchGoogleUsers, 
@@ -58,6 +58,7 @@ export function GoogleWorkspaceModal({ open, onOpenChange, onDisconnect }: Googl
     createGoogleUser,
     deleteGoogleUser,
     googleUsers, 
+    licenseInfo,
     isLoadingUsers, 
     isDisconnecting, 
     isCreatingUser,
@@ -89,21 +90,33 @@ export function GoogleWorkspaceModal({ open, onOpenChange, onDisconnect }: Googl
       return;
     }
 
-    const result = await createGoogleUser(newUserFirstName.trim(), newUserLastName.trim());
+    if (!newUserPersonalEmail.trim()) {
+      toast.error("Veuillez renseigner l'adresse email personnelle");
+      return;
+    }
+
+    // Basic email validation
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(newUserPersonalEmail.trim())) {
+      toast.error("Veuillez entrer une adresse email valide");
+      return;
+    }
+
+    const result = await createGoogleUser(
+      newUserFirstName.trim(), 
+      newUserLastName.trim(),
+      newUserPersonalEmail.trim()
+    );
 
     if (result.success && result.user) {
       toast.success(`Utilisateur ${result.user.email} créé avec succès`);
-      setCreatedUserPassword(result.temporaryPassword || null);
+      setInvitationSentTo(result.invitationSentTo || null);
       
       if (autoInvite && result.user.email) {
         const inviteResult = await createInvitation({ email: result.user.email, role: inviteRole });
         if (inviteResult.invitation) {
-          toast.success(`Invitation envoyée à ${result.user.email}`);
+          toast.success(`Invitation à l'application envoyée à ${result.user.email}`);
         }
-      }
-
-      if (!result.temporaryPassword) {
-        resetAddUserForm();
       }
     } else {
       toast.error(result.error || "Erreur lors de la création");
@@ -128,19 +141,10 @@ export function GoogleWorkspaceModal({ open, onOpenChange, onDisconnect }: Googl
     setShowAddUserForm(false);
     setNewUserFirstName("");
     setNewUserLastName("");
+    setNewUserPersonalEmail("");
     setAutoInvite(false);
     setInviteRole("user");
-    setCreatedUserPassword(null);
-    setCopiedPassword(false);
-  };
-
-  const copyPassword = async () => {
-    if (createdUserPassword) {
-      await navigator.clipboard.writeText(createdUserPassword);
-      setCopiedPassword(true);
-      toast.success("Mot de passe copié");
-      setTimeout(() => setCopiedPassword(false), 2000);
-    }
+    setInvitationSentTo(null);
   };
 
   const filteredUsers = googleUsers.filter(user =>
@@ -171,43 +175,47 @@ export function GoogleWorkspaceModal({ open, onOpenChange, onDisconnect }: Googl
         </DialogHeader>
 
         <div className="space-y-4 mt-4">
-          {/* Password display after creation */}
-          {createdUserPassword && (
+          {/* License info banner */}
+          {licenseInfo && (
+            <div className="rounded-lg bg-muted/50 p-3 flex items-center gap-3">
+              <CreditCard className="h-5 w-5 text-primary shrink-0" />
+              <div className="flex-1">
+                <p className="text-sm font-medium">{licenseInfo.totalUsers} utilisateurs</p>
+                {licenseInfo.usedLicenses > 0 && (
+                  <p className="text-xs text-muted-foreground">
+                    {licenseInfo.usedLicenses} licences attribuées
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Success message after creation */}
+          {invitationSentTo && (
             <div className="rounded-lg border border-green-500/50 bg-green-500/10 p-4">
               <div className="flex items-start justify-between gap-3">
                 <div className="flex-1">
-                  <p className="text-sm font-medium text-green-700 dark:text-green-400">
+                  <p className="text-sm font-medium text-green-700 dark:text-green-400 flex items-center gap-2">
+                    <Check className="h-4 w-4" />
                     Utilisateur créé avec succès !
                   </p>
                   <p className="text-xs text-muted-foreground mt-1">
-                    Mot de passe temporaire (à changer à la première connexion) :
+                    Une invitation a été envoyée à <strong>{invitationSentTo}</strong> pour configurer son compte.
                   </p>
-                  <code className="block mt-2 bg-background rounded px-3 py-2 text-sm font-mono">
-                    {createdUserPassword}
-                  </code>
                 </div>
-                <div className="flex gap-2">
-                  <Button 
-                    size="sm" 
-                    variant="outline"
-                    onClick={copyPassword}
-                  >
-                    {copiedPassword ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
-                  </Button>
-                  <Button 
-                    size="sm" 
-                    variant="ghost"
-                    onClick={resetAddUserForm}
-                  >
-                    <X className="h-4 w-4" />
-                  </Button>
-                </div>
+                <Button 
+                  size="sm" 
+                  variant="ghost"
+                  onClick={resetAddUserForm}
+                >
+                  <X className="h-4 w-4" />
+                </Button>
               </div>
             </div>
           )}
 
           {/* Add user form for admins */}
-          {isAdmin && !createdUserPassword && (
+          {isAdmin && !invitationSentTo && (
             <>
               {showAddUserForm ? (
                 <div className="rounded-lg border border-border p-4 space-y-4">
@@ -241,9 +249,23 @@ export function GoogleWorkspaceModal({ open, onOpenChange, onDisconnect }: Googl
 
                   {previewEmail && (
                     <p className="text-xs text-muted-foreground">
-                      Email : <span className="font-mono">{previewEmail}</span>
+                      Email Workspace : <span className="font-mono">{previewEmail}</span>
                     </p>
                   )}
+
+                  <div className="space-y-2">
+                    <Label htmlFor="personalEmail">Email personnel (pour l'invitation)</Label>
+                    <Input
+                      id="personalEmail"
+                      type="email"
+                      placeholder="jean.dupont@gmail.com"
+                      value={newUserPersonalEmail}
+                      onChange={(e) => setNewUserPersonalEmail(e.target.value)}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      L'invitation pour rejoindre Google Workspace sera envoyée à cette adresse.
+                    </p>
+                  </div>
 
                   <div className="flex items-center space-x-2">
                     <Checkbox
@@ -252,13 +274,13 @@ export function GoogleWorkspaceModal({ open, onOpenChange, onDisconnect }: Googl
                       onCheckedChange={(checked) => setAutoInvite(checked === true)}
                     />
                     <Label htmlFor="autoInvite" className="text-sm">
-                      Inviter automatiquement dans l'application
+                      Inviter aussi dans l'application
                     </Label>
                   </div>
 
                   {autoInvite && (
                     <div className="space-y-2">
-                      <Label>Rôle</Label>
+                      <Label>Rôle dans l'application</Label>
                       <Select value={inviteRole} onValueChange={(v) => setInviteRole(v as typeof inviteRole)}>
                         <SelectTrigger>
                           <SelectValue />
@@ -274,7 +296,7 @@ export function GoogleWorkspaceModal({ open, onOpenChange, onDisconnect }: Googl
 
                   <Button 
                     onClick={handleCreateUser} 
-                    disabled={isCreatingUser || !newUserFirstName.trim() || !newUserLastName.trim()}
+                    disabled={isCreatingUser || !newUserFirstName.trim() || !newUserLastName.trim() || !newUserPersonalEmail.trim()}
                     className="w-full"
                   >
                     {isCreatingUser ? (
@@ -282,7 +304,7 @@ export function GoogleWorkspaceModal({ open, onOpenChange, onDisconnect }: Googl
                     ) : (
                       <UserPlus className="h-4 w-4 mr-2" />
                     )}
-                    Créer l'utilisateur
+                    Créer et envoyer l'invitation
                   </Button>
                 </div>
               ) : (
@@ -364,6 +386,11 @@ export function GoogleWorkspaceModal({ open, onOpenChange, onDisconnect }: Googl
                       <Mail className="h-3 w-3" />
                       {user.email}
                     </p>
+                    {user.license?.skuName && (
+                      <p className="text-xs text-muted-foreground/70 mt-0.5">
+                        {user.license.skuName}
+                      </p>
+                    )}
                   </div>
                   {isAdmin && !user.isCurrentUser && (
                     <Button

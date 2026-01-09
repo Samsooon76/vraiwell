@@ -1,12 +1,24 @@
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 
+export interface GoogleUserLicense {
+  skuId: string;
+  productId: string;
+  skuName?: string;
+}
+
 export interface GoogleUser {
   id: string;
   email: string;
   name: string;
   avatar?: string;
   isCurrentUser?: boolean;
+  license?: GoogleUserLicense | null;
+}
+
+export interface LicenseInfo {
+  totalUsers: number;
+  usedLicenses: number;
 }
 
 export interface CreateGoogleUserResult {
@@ -16,7 +28,7 @@ export interface CreateGoogleUserResult {
     email: string;
     name: string;
   };
-  temporaryPassword?: string;
+  invitationSentTo?: string;
   error?: string;
 }
 
@@ -28,6 +40,7 @@ export function useGoogleAuth() {
   const [isConnecting, setIsConnecting] = useState(false);
   const [isLoadingUsers, setIsLoadingUsers] = useState(false);
   const [googleUsers, setGoogleUsers] = useState<GoogleUser[]>([]);
+  const [licenseInfo, setLicenseInfo] = useState<LicenseInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isDisconnecting, setIsDisconnecting] = useState(false);
   const [isCreatingUser, setIsCreatingUser] = useState(false);
@@ -150,6 +163,7 @@ export function useGoogleAuth() {
       }
 
       setGoogleUsers(data.users || []);
+      setLicenseInfo(data.licenseInfo || null);
       return data;
     } catch (err: any) {
       setError(err.message);
@@ -177,7 +191,11 @@ export function useGoogleAuth() {
     return !!googleIdentity;
   };
 
-  const createGoogleUser = async (firstName: string, lastName: string): Promise<CreateGoogleUserResult> => {
+  const createGoogleUser = async (
+    firstName: string, 
+    lastName: string, 
+    personalEmail: string
+  ): Promise<CreateGoogleUserResult> => {
     setIsCreatingUser(true);
     setError(null);
 
@@ -210,6 +228,7 @@ export function useGoogleAuth() {
             provider_token: providerToken,
             firstName,
             lastName,
+            personalEmail,
           }),
         }
       );
@@ -226,7 +245,7 @@ export function useGoogleAuth() {
       return {
         success: true,
         user: data.user,
-        temporaryPassword: data.temporaryPassword,
+        invitationSentTo: data.invitationSentTo,
       };
     } catch (err: any) {
       setError(err.message);
@@ -297,6 +316,7 @@ export function useGoogleAuth() {
     isCreatingUser,
     isDeletingUser,
     googleUsers,
+    licenseInfo,
     error,
     connectGoogle,
     disconnectGoogle,
