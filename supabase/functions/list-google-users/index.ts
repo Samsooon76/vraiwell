@@ -105,51 +105,69 @@ serve(async (req) => {
           const directoryData = await directoryResponse.json();
           console.log("Directory API returned", directoryData.users?.length || 0, "users");
 
-          // Try to fetch license information
+          // Try to fetch license information for multiple SKUs
           let licenseMap: Record<string, { skuId: string; productId: string; skuName?: string }> = {};
-          let totalLicenses = 0;
-          let usedLicenses = 0;
+          
+          // List of common Workspace SKUs to check
+          const skusToCheck = [
+            "1010020020", // Business Starter
+            "1010020025", // Business Standard  
+            "1010020027", // Business Plus
+            "1010060001", // Enterprise Essentials
+            "101031",     // Enterprise Standard
+            "101033",     // Enterprise Plus
+          ];
 
-          try {
-            // Fetch licenses for Google-Apps (main Workspace product)
-            const licensesResponse = await fetch(
-              `https://licensing.googleapis.com/apps/licensing/v1/product/Google-Apps/sku/1010020025/users?customerId=${domain}&maxResults=1000`,
-              {
-                headers: {
-                  Authorization: `Bearer ${providerToken}`,
-                  "Content-Type": "application/json",
-                },
+          for (const skuId of skusToCheck) {
+            try {
+              const licensesResponse = await fetch(
+                `https://licensing.googleapis.com/apps/licensing/v1/product/Google-Apps/sku/${skuId}/users?customerId=${domain}&maxResults=1000`,
+                {
+                  headers: {
+                    Authorization: `Bearer ${providerToken}`,
+                    "Content-Type": "application/json",
+                  },
+                }
+              );
+
+              if (licensesResponse.ok) {
+                const licensesData = await licensesResponse.json();
+                console.log(`Licenses API returned ${licensesData.items?.length || 0} licenses for SKU ${skuId}`);
+                
+                (licensesData.items || []).forEach((license: any) => {
+                  // Use email as key since that's more reliable
+                  const userKey = license.userId?.toLowerCase();
+                  if (userKey && !licenseMap[userKey]) {
+                    licenseMap[userKey] = {
+                      skuId: license.skuId,
+                      productId: license.productId,
+                      skuName: LICENSE_NAMES[license.skuId] || LICENSE_NAMES[skuId] || `SKU ${license.skuId}`,
+                    };
+                  }
+                });
               }
-            );
-
-            if (licensesResponse.ok) {
-              const licensesData = await licensesResponse.json();
-              console.log("Licenses API returned", licensesData.items?.length || 0, "licenses");
-              
-              usedLicenses = licensesData.items?.length || 0;
-              
-              (licensesData.items || []).forEach((license: any) => {
-                licenseMap[license.userId] = {
-                  skuId: license.skuId,
-                  productId: license.productId,
-                  skuName: LICENSE_NAMES[license.skuId] || license.skuName || license.skuId,
-                };
-              });
-            } else {
-              console.log("Licenses API not available or no permissions");
+            } catch (skuError) {
+              // Continue with other SKUs
             }
-          } catch (licenseError) {
-            console.log("Could not fetch licenses:", licenseError);
           }
 
-          const workspaceUsers = (directoryData.users || []).map((gUser: any) => ({
-            id: gUser.id,
-            email: gUser.primaryEmail,
-            name: gUser.name?.fullName || gUser.primaryEmail,
-            avatar: gUser.thumbnailPhotoUrl,
-            isCurrentUser: gUser.primaryEmail === googleUserData?.email,
-            license: licenseMap[gUser.id] || licenseMap[gUser.primaryEmail] || null,
-          }));
+          console.log(`Total licenses found in map: ${Object.keys(licenseMap).length}`);
+
+          const workspaceUsers = (directoryData.users || []).map((gUser: any) => {
+            const userEmail = gUser.primaryEmail?.toLowerCase();
+            const userLicense = licenseMap[userEmail] || licenseMap[gUser.id] || null;
+            return {
+              id: gUser.id,
+              email: gUser.primaryEmail,
+              name: gUser.name?.fullName || gUser.primaryEmail,
+              avatar: gUser.thumbnailPhotoUrl,
+              isCurrentUser: gUser.primaryEmail === googleUserData?.email,
+              license: userLicense,
+            };
+          });
+
+          // Count users with licenses
+          const usersWithLicenses = workspaceUsers.filter((u: any) => u.license !== null).length;
 
           return new Response(
             JSON.stringify({ 
@@ -158,8 +176,7 @@ serve(async (req) => {
               domain,
               licenseInfo: {
                 totalUsers: workspaceUsers.length,
-                usedLicenses,
-                // Note: Total available licenses requires Reseller API (not available for direct customers)
+                usedLicenses: usersWithLicenses,
               }
             }),
             { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }

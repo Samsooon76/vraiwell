@@ -175,21 +175,44 @@ export function GoogleWorkspaceModal({ open, onOpenChange, onDisconnect }: Googl
         </DialogHeader>
 
         <div className="flex-1 overflow-y-auto space-y-4 mt-4 pr-2">
-          {/* License info banner */}
+          {/* License info banner with ring */}
           {licenseInfo && (
-            <div className="rounded-lg bg-primary/5 border border-primary/20 p-4 flex items-center gap-4">
-              <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
-                <CreditCard className="h-5 w-5 text-primary" />
+            <div className="rounded-lg bg-primary/5 border border-primary/20 p-4 flex items-center gap-5">
+              {/* Ring chart */}
+              <div className="relative h-16 w-16 shrink-0">
+                <svg className="h-16 w-16 -rotate-90" viewBox="0 0 36 36">
+                  {/* Background ring */}
+                  <circle
+                    cx="18"
+                    cy="18"
+                    r="15.5"
+                    fill="none"
+                    className="stroke-muted"
+                    strokeWidth="3"
+                  />
+                  {/* Progress ring */}
+                  <circle
+                    cx="18"
+                    cy="18"
+                    r="15.5"
+                    fill="none"
+                    className="stroke-primary"
+                    strokeWidth="3"
+                    strokeLinecap="round"
+                    strokeDasharray={`${(licenseInfo.usedLicenses / licenseInfo.totalUsers) * 97.4} 97.4`}
+                  />
+                </svg>
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <span className="text-sm font-bold">
+                    {licenseInfo.usedLicenses}/{licenseInfo.totalUsers}
+                  </span>
+                </div>
               </div>
-              <div className="flex-1 grid grid-cols-2 gap-4">
-                <div>
-                  <p className="text-xs text-muted-foreground">Utilisateurs</p>
-                  <p className="text-lg font-semibold">{licenseInfo.totalUsers}</p>
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground">Licences attribuées</p>
-                  <p className="text-lg font-semibold">{licenseInfo.usedLicenses}</p>
-                </div>
+              <div className="flex-1">
+                <p className="text-sm font-medium">Licences utilisées</p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  {licenseInfo.usedLicenses} sur {licenseInfo.totalUsers} utilisateurs
+                </p>
               </div>
             </div>
           )}
