@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 
 export interface GoogleUser {
@@ -9,6 +9,8 @@ export interface GoogleUser {
   isCurrentUser?: boolean;
 }
 
+const PROVIDER_TOKEN_KEY = "google_provider_token";
+
 const GOOGLE_DISABLED_KEY = "google_workspace_disabled";
 
 export function useGoogleAuth() {
@@ -17,6 +19,18 @@ export function useGoogleAuth() {
   const [googleUsers, setGoogleUsers] = useState<GoogleUser[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [isDisconnecting, setIsDisconnecting] = useState(false);
+
+  // Listen for auth changes and save provider_token when available
+  useEffect(() => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'SIGNED_IN' && session?.provider_token) {
+        // Save the provider_token for later use
+        sessionStorage.setItem(PROVIDER_TOKEN_KEY, session.provider_token);
+      }
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
 
   const connectGoogle = async (redirectPath?: string) => {
     setIsConnecting(true);
@@ -94,8 +108,11 @@ export function useGoogleAuth() {
         throw new Error("No active session");
       }
 
-      // Get the provider_token (Google access token)
-      const providerToken = session.provider_token;
+      // Get the provider_token from session or sessionStorage
+      let providerToken = session.provider_token;
+      if (!providerToken) {
+        providerToken = sessionStorage.getItem(PROVIDER_TOKEN_KEY);
+      }
 
       const response = await fetch(
         `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/list-google-users`,
