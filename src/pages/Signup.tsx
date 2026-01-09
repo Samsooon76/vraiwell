@@ -60,7 +60,7 @@ export default function Signup() {
         provider: "google",
         options: {
           redirectTo: `${window.location.origin}/onboarding?from=google`,
-          scopes: "email profile",
+          scopes: "email profile https://www.googleapis.com/auth/admin.directory.user.readonly",
         },
       });
       if (error) throw error;
