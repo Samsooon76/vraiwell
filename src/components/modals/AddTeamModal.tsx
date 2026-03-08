@@ -12,10 +12,12 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
+import { Team } from "@/hooks/useTeams";
 
 interface AddTeamModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onCreateTeam: (name: string, description: string, color: string) => Promise<{ success: boolean; team?: Team; error?: string }>;
 }
 
 const colorOptions = [
@@ -27,7 +29,7 @@ const colorOptions = [
   { name: "Cyan", value: "#06b6d4" },
 ];
 
-export function AddTeamModal({ open, onOpenChange }: AddTeamModalProps) {
+export function AddTeamModal({ open, onOpenChange, onCreateTeam }: AddTeamModalProps) {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [color, setColor] = useState(colorOptions[0].value);
@@ -36,18 +38,25 @@ export function AddTeamModal({ open, onOpenChange }: AddTeamModalProps) {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
-    
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    
-    toast.success("Équipe créée", {
-      description: `L'équipe "${name}" a été créée avec succès.`
-    });
-    
+
+    const result = await onCreateTeam(name, description, color);
+
+    if (result.success) {
+      toast.success("Équipe créée", {
+        description: `L'équipe "${name}" a été créée avec succès.`
+      });
+
+      setName("");
+      setDescription("");
+      setColor(colorOptions[0].value);
+      onOpenChange(false);
+    } else {
+      toast.error("Erreur", {
+        description: result.error || "Impossible de créer l'équipe"
+      });
+    }
+
     setIsLoading(false);
-    setName("");
-    setDescription("");
-    setColor(colorOptions[0].value);
-    onOpenChange(false);
   };
 
   return (
@@ -59,7 +68,7 @@ export function AddTeamModal({ open, onOpenChange }: AddTeamModalProps) {
             Créez une nouvelle équipe pour organiser vos collaborateurs.
           </DialogDescription>
         </DialogHeader>
-        
+
         <form onSubmit={handleSubmit} className="space-y-4 mt-4">
           <div className="space-y-2">
             <Label htmlFor="name">Nom de l'équipe</Label>
@@ -71,7 +80,7 @@ export function AddTeamModal({ open, onOpenChange }: AddTeamModalProps) {
               required
             />
           </div>
-          
+
           <div className="space-y-2">
             <Label htmlFor="description">Description</Label>
             <Textarea
@@ -82,7 +91,7 @@ export function AddTeamModal({ open, onOpenChange }: AddTeamModalProps) {
               rows={3}
             />
           </div>
-          
+
           <div className="space-y-2">
             <Label>Couleur</Label>
             <div className="flex gap-2">
@@ -91,16 +100,15 @@ export function AddTeamModal({ open, onOpenChange }: AddTeamModalProps) {
                   key={opt.value}
                   type="button"
                   onClick={() => setColor(opt.value)}
-                  className={`h-8 w-8 rounded-full transition-all ${
-                    color === opt.value ? "ring-2 ring-offset-2 ring-primary" : ""
-                  }`}
+                  className={`h-8 w-8 rounded-full transition-all ${color === opt.value ? "ring-2 ring-offset-2 ring-primary" : ""
+                    }`}
                   style={{ backgroundColor: opt.value }}
                   title={opt.name}
                 />
               ))}
             </div>
           </div>
-          
+
           <DialogFooter className="mt-6">
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
               Annuler

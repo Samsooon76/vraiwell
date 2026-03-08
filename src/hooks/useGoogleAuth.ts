@@ -65,10 +65,10 @@ export function useGoogleAuth() {
     try {
       // Clear any previous disabled state when reconnecting
       localStorage.removeItem(GOOGLE_DISABLED_KEY);
-      
+
       // Default to current path, or use provided redirect path
       const finalRedirect = redirectPath || window.location.pathname;
-      
+
       const { error } = await supabase.auth.signInWithOAuth({
         provider: "google",
         options: {
@@ -90,7 +90,7 @@ export function useGoogleAuth() {
 
     try {
       const { data: { user } } = await supabase.auth.getUser();
-      
+
       if (!user) {
         throw new Error("No active session");
       }
@@ -102,7 +102,7 @@ export function useGoogleAuth() {
       if (googleIdentity) {
         // Try to unlink the identity if user has other auth methods
         const hasOtherIdentities = user.identities && user.identities.length > 1;
-        
+
         if (hasOtherIdentities) {
           const { error } = await supabase.auth.unlinkIdentity(googleIdentity);
           if (error) throw error;
@@ -129,7 +129,7 @@ export function useGoogleAuth() {
 
     try {
       const { data: { session } } = await supabase.auth.getSession();
-      
+
       if (!session) {
         throw new Error("No active session");
       }
@@ -175,7 +175,7 @@ export function useGoogleAuth() {
 
   const checkGoogleConnection = async () => {
     const { data: { user } } = await supabase.auth.getUser();
-    
+
     if (!user) return false;
 
     // Check if user manually disabled the integration
@@ -192,8 +192,8 @@ export function useGoogleAuth() {
   };
 
   const createGoogleUser = async (
-    firstName: string, 
-    lastName: string, 
+    firstName: string,
+    lastName: string,
     personalEmail: string
   ): Promise<CreateGoogleUserResult> => {
     setIsCreatingUser(true);
@@ -201,7 +201,7 @@ export function useGoogleAuth() {
 
     try {
       const { data: { session } } = await supabase.auth.getSession();
-      
+
       if (!session) {
         throw new Error("No active session");
       }
@@ -223,7 +223,7 @@ export function useGoogleAuth() {
             "Content-Type": "application/json",
             Authorization: `Bearer ${session.access_token}`,
           },
-          body: JSON.stringify({ 
+          body: JSON.stringify({
             action: "create",
             provider_token: providerToken,
             firstName,
@@ -261,7 +261,7 @@ export function useGoogleAuth() {
 
     try {
       const { data: { session } } = await supabase.auth.getSession();
-      
+
       if (!session) {
         throw new Error("No active session");
       }
@@ -283,7 +283,7 @@ export function useGoogleAuth() {
             "Content-Type": "application/json",
             Authorization: `Bearer ${session.access_token}`,
           },
-          body: JSON.stringify({ 
+          body: JSON.stringify({
             action: "delete",
             provider_token: providerToken,
             userId,

@@ -4,8 +4,8 @@ import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ToolLogo } from "@/components/tools/ToolLogo";
-import { 
-  Plus, 
+import {
+  Plus,
   Check,
   Settings,
   ExternalLink,
@@ -18,6 +18,12 @@ import { GoogleWorkspaceModal } from "@/components/modals/GoogleWorkspaceModal";
 import { MicrosoftWorkspaceModal } from "@/components/modals/MicrosoftWorkspaceModal";
 import { useGoogleAuth } from "@/hooks/useGoogleAuth";
 import { useMicrosoftAuth } from "@/hooks/useMicrosoftAuth";
+import { useSlackAuth } from "@/hooks/useSlackAuth";
+import { SlackWorkspaceModal } from "@/components/modals/SlackWorkspaceModal";
+import { useNotionAuth } from "@/hooks/useNotionAuth";
+import { NotionWorkspaceModal } from "@/components/modals/NotionWorkspaceModal";
+import { useHubSpotAuth } from "@/hooks/useHubSpotAuth";
+import { HubSpotWorkspaceModal } from "@/components/modals/HubSpotWorkspaceModal";
 import { toast } from "sonner";
 
 interface Integration {
@@ -52,34 +58,68 @@ export default function Integrations() {
   const [addIntegrationOpen, setAddIntegrationOpen] = useState(false);
   const [googleConfigOpen, setGoogleConfigOpen] = useState(false);
   const [microsoftConfigOpen, setMicrosoftConfigOpen] = useState(false);
+  const [slackConfigOpen, setSlackConfigOpen] = useState(false);
+  const [notionConfigOpen, setNotionConfigOpen] = useState(false);
+  const [hubspotConfigOpen, setHubspotConfigOpen] = useState(false);
   const [integrations, setIntegrations] = useState<Integration[]>(defaultIntegrations);
-  
+
   const { connectGoogle, isConnecting: isConnectingGoogle, checkGoogleConnection } = useGoogleAuth();
   const { connectMicrosoft, isConnecting: isConnectingMicrosoft, checkMicrosoftConnection } = useMicrosoftAuth();
+  const { hasToken: isSlackConnected } = useSlackAuth();
+  const { hasToken: isNotionConnected } = useNotionAuth();
+  const { hasToken: isHubSpotConnected } = useHubSpotAuth();
 
   // Check connection status on mount
   useEffect(() => {
     const checkConnections = async () => {
+      // Get action counts from centralized registry (no DB call needed)
+      const { getActionCountByIntegration } = await import('@/config/workflowActions');
+      const actionCounts = getActionCountByIntegration();
+
       const isGoogleConnected = await checkGoogleConnection();
       if (isGoogleConnected) {
-        setIntegrations(prev => prev.map(int => 
-          int.name === "Google Workspace" 
-            ? { ...int, status: "connected" as const, lastSync: "Connecté", actions: 8 }
+        setIntegrations(prev => prev.map(int =>
+          int.name === "Google Workspace"
+            ? { ...int, status: "connected" as const, lastSync: "Connecté", actions: actionCounts.google }
             : int
         ));
       }
-      
+
       const isMicrosoftConnected = await checkMicrosoftConnection();
       if (isMicrosoftConnected) {
-        setIntegrations(prev => prev.map(int => 
-          int.name === "Microsoft 365" 
-            ? { ...int, status: "connected" as const, lastSync: "Connecté", actions: 12 }
+        setIntegrations(prev => prev.map(int =>
+          int.name === "Microsoft 365"
+            ? { ...int, status: "connected" as const, lastSync: "Connecté", actions: actionCounts.microsoft }
+            : int
+        ));
+      }
+
+      if (isSlackConnected) {
+        setIntegrations(prev => prev.map(int =>
+          int.name === "Slack"
+            ? { ...int, status: "connected" as const, lastSync: "Connecté", actions: actionCounts.slack }
+            : int
+        ));
+      }
+
+      if (isNotionConnected) {
+        setIntegrations(prev => prev.map(int =>
+          int.name === "Notion"
+            ? { ...int, status: "connected" as const, lastSync: "Connecté", actions: actionCounts.notion }
+            : int
+        ));
+      }
+
+      if (isHubSpotConnected) {
+        setIntegrations(prev => prev.map(int =>
+          int.name === "HubSpot"
+            ? { ...int, status: "connected" as const, lastSync: "Connecté", actions: actionCounts.hubspot }
             : int
         ));
       }
     };
     checkConnections();
-  }, []);
+  }, [isSlackConnected, isNotionConnected, isHubSpotConnected]);
 
   const handleConnectGoogle = async () => {
     try {
@@ -92,16 +132,16 @@ export default function Integrations() {
 
   const handleConnectMicrosoft = async () => {
     try {
-      await connectMicrosoft();
+      await connectMicrosoft("/dashboard/integrations");
     } catch (error) {
       toast.error("Erreur de connexion Microsoft");
     }
   };
 
   const filteredIntegrations = integrations.filter((integration) =>
-    filter === "all" ? true : 
-    filter === "connected" ? integration.status === "connected" || integration.status === "error" :
-    integration.status === "available"
+    filter === "all" ? true :
+      filter === "connected" ? integration.status === "connected" || integration.status === "error" :
+        integration.status === "available"
   );
 
   const connectedCount = integrations.filter(i => i.status === "connected").length;
@@ -131,11 +171,10 @@ export default function Integrations() {
         >
           <button
             onClick={() => setFilter("all")}
-            className={`flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium transition-colors ${
-              filter === "all"
-                ? "bg-primary text-primary-foreground"
-                : "bg-muted text-muted-foreground hover:bg-muted/80"
-            }`}
+            className={`flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium transition-colors ${filter === "all"
+              ? "bg-primary text-primary-foreground"
+              : "bg-muted text-muted-foreground hover:bg-muted/80"
+              }`}
           >
             Toutes
             <span className="rounded-full bg-background/20 px-2 py-0.5 text-xs">
@@ -144,11 +183,10 @@ export default function Integrations() {
           </button>
           <button
             onClick={() => setFilter("connected")}
-            className={`flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium transition-colors ${
-              filter === "connected"
-                ? "bg-success text-success-foreground"
-                : "bg-muted text-muted-foreground hover:bg-muted/80"
-            }`}
+            className={`flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium transition-colors ${filter === "connected"
+              ? "bg-success text-success-foreground"
+              : "bg-muted text-muted-foreground hover:bg-muted/80"
+              }`}
           >
             <Check className="h-4 w-4" />
             Connectées
@@ -158,11 +196,10 @@ export default function Integrations() {
           </button>
           <button
             onClick={() => setFilter("available")}
-            className={`flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium transition-colors ${
-              filter === "available"
-                ? "bg-secondary text-secondary-foreground"
-                : "bg-muted text-muted-foreground hover:bg-muted/80"
-            }`}
+            className={`flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium transition-colors ${filter === "available"
+              ? "bg-secondary text-secondary-foreground"
+              : "bg-muted text-muted-foreground hover:bg-muted/80"
+              }`}
           >
             <Plus className="h-4 w-4" />
             Disponibles
@@ -231,15 +268,21 @@ export default function Integrations() {
               <div className="flex gap-2">
                 {integration.status === "connected" && (
                   <>
-                    <Button 
-                      variant="soft" 
-                      size="sm" 
+                    <Button
+                      variant="soft"
+                      size="sm"
                       className="flex-1"
                       onClick={() => {
                         if (integration.name === "Google Workspace") {
                           setGoogleConfigOpen(true);
                         } else if (integration.name === "Microsoft 365") {
                           setMicrosoftConfigOpen(true);
+                        } else if (integration.name === "Slack") {
+                          setSlackConfigOpen(true);
+                        } else if (integration.name === "Notion") {
+                          setNotionConfigOpen(true);
+                        } else if (integration.name === "HubSpot") {
+                          setHubspotConfigOpen(true);
                         }
                       }}
                     >
@@ -253,10 +296,10 @@ export default function Integrations() {
                 )}
                 {integration.status === "available" && (
                   integration.name === "Google Workspace" ? (
-                    <Button 
-                      variant="default" 
-                      size="sm" 
-                      className="flex-1" 
+                    <Button
+                      variant="default"
+                      size="sm"
+                      className="flex-1"
                       onClick={handleConnectGoogle}
                       disabled={isConnectingGoogle}
                     >
@@ -268,10 +311,10 @@ export default function Integrations() {
                       {isConnectingGoogle ? "Connexion..." : "Connecter"}
                     </Button>
                   ) : integration.name === "Microsoft 365" ? (
-                    <Button 
-                      variant="default" 
-                      size="sm" 
-                      className="flex-1" 
+                    <Button
+                      variant="default"
+                      size="sm"
+                      className="flex-1"
                       onClick={handleConnectMicrosoft}
                       disabled={isConnectingMicrosoft}
                     >
@@ -282,10 +325,39 @@ export default function Integrations() {
                       )}
                       {isConnectingMicrosoft ? "Connexion..." : "Connecter"}
                     </Button>
-                  ) : (
-                    <Button variant="default" size="sm" className="flex-1" onClick={() => setAddIntegrationOpen(true)}>
+                  ) : integration.name === "Slack" ? (
+                    <Button
+                      variant="default"
+                      size="sm"
+                      className="flex-1"
+                      onClick={() => setSlackConfigOpen(true)}
+                    >
                       <Plus className="h-4 w-4" />
                       Connecter
+                    </Button>
+                  ) : integration.name === "Notion" ? (
+                    <Button
+                      variant="default"
+                      size="sm"
+                      className="flex-1"
+                      onClick={() => setNotionConfigOpen(true)}
+                    >
+                      <Plus className="h-4 w-4" />
+                      Connecter
+                    </Button>
+                  ) : integration.name === "HubSpot" ? (
+                    <Button
+                      variant="default"
+                      size="sm"
+                      className="flex-1"
+                      onClick={() => setHubspotConfigOpen(true)}
+                    >
+                      <Plus className="h-4 w-4" />
+                      Connecter
+                    </Button>
+                  ) : (
+                    <Button variant="outline" disabled size="sm" className="flex-1 opacity-50">
+                      Bientôt
                     </Button>
                   )
                 )}
@@ -319,30 +391,66 @@ export default function Integrations() {
           </Button>
         </motion.div>
       </div>
-      
+
       <AddIntegrationModal open={addIntegrationOpen} onOpenChange={setAddIntegrationOpen} />
-      <GoogleWorkspaceModal 
-        open={googleConfigOpen} 
+      <GoogleWorkspaceModal
+        open={googleConfigOpen}
         onOpenChange={setGoogleConfigOpen}
         onDisconnect={() => {
-          setIntegrations(prev => prev.map(int => 
-            int.name === "Google Workspace" 
+          setIntegrations(prev => prev.map(int =>
+            int.name === "Google Workspace"
               ? { ...int, status: "available" as const, lastSync: undefined, actions: undefined }
               : int
           ));
           toast.success("Google Workspace déconnecté");
         }}
       />
-      <MicrosoftWorkspaceModal 
-        open={microsoftConfigOpen} 
+      <MicrosoftWorkspaceModal
+        open={microsoftConfigOpen}
         onOpenChange={setMicrosoftConfigOpen}
         onDisconnect={() => {
-          setIntegrations(prev => prev.map(int => 
-            int.name === "Microsoft 365" 
+          setIntegrations(prev => prev.map(int =>
+            int.name === "Microsoft 365"
               ? { ...int, status: "available" as const, lastSync: undefined, actions: undefined }
               : int
           ));
           toast.success("Microsoft 365 déconnecté");
+        }}
+      />
+      <SlackWorkspaceModal
+        open={slackConfigOpen}
+        onOpenChange={setSlackConfigOpen}
+        onDisconnect={() => {
+          setIntegrations(prev => prev.map(int =>
+            int.name === "Slack"
+              ? { ...int, status: "available" as const, lastSync: undefined, actions: undefined }
+              : int
+          ));
+          toast.success("Slack déconnecté");
+        }}
+      />
+      <NotionWorkspaceModal
+        open={notionConfigOpen}
+        onOpenChange={setNotionConfigOpen}
+        onDisconnect={() => {
+          setIntegrations(prev => prev.map(int =>
+            int.name === "Notion"
+              ? { ...int, status: "available" as const, lastSync: undefined, actions: undefined }
+              : int
+          ));
+          toast.success("Notion déconnecté");
+        }}
+      />
+      <HubSpotWorkspaceModal
+        open={hubspotConfigOpen}
+        onOpenChange={setHubspotConfigOpen}
+        onDisconnect={() => {
+          setIntegrations(prev => prev.map(int =>
+            int.name === "HubSpot"
+              ? { ...int, status: "available" as const, lastSync: undefined, actions: undefined }
+              : int
+          ));
+          toast.success("HubSpot déconnecté");
         }}
       />
     </DashboardLayout>

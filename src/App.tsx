@@ -15,6 +15,8 @@ import Analytics from "./pages/Analytics";
 import Teams from "./pages/Teams";
 import Integrations from "./pages/Integrations";
 import Workflows from "./pages/Workflows";
+import WorkflowBuilder from "./pages/WorkflowBuilder";
+import Contracts from "./pages/Contracts";
 import Settings from "./pages/Settings";
 import NotFound from "./pages/NotFound";
 
@@ -38,6 +40,9 @@ const App = () => (
             <Route path="/dashboard/teams" element={<ProtectedRoute><Teams /></ProtectedRoute>} />
             <Route path="/dashboard/integrations" element={<ProtectedRoute><Integrations /></ProtectedRoute>} />
             <Route path="/dashboard/workflows" element={<ProtectedRoute><Workflows /></ProtectedRoute>} />
+            <Route path="/dashboard/contracts" element={<ProtectedRoute><Contracts /></ProtectedRoute>} />
+            <Route path="/dashboard/workflows/new" element={<ProtectedRoute><WorkflowBuilder /></ProtectedRoute>} />
+            <Route path="/dashboard/workflows/:id" element={<ProtectedRoute><WorkflowBuilder /></ProtectedRoute>} />
             <Route path="/dashboard/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
             <Route path="*" element={<NotFound />} />
           </Routes>

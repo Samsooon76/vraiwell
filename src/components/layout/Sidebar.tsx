@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { 
   LayoutGrid, 
   FileText, 
+  FileCheck,
   BarChart3, 
   Settings, 
   Users,
@@ -17,6 +18,7 @@ import { useState } from "react";
 
 const navigation = [
   { name: "Bibliothèque", href: "/dashboard", icon: LayoutGrid },
+  { name: "Contrats", href: "/dashboard/contracts", icon: FileCheck },
   { name: "Demandes", href: "/dashboard/requests", icon: FileText },
   { name: "Analytics", href: "/dashboard/analytics", icon: BarChart3 },
   { name: "Équipes", href: "/dashboard/teams", icon: Users },

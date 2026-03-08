@@ -7,11 +7,6 @@ export type Json =
   | Json[]
 
 export type Database = {
-  // Allows to automatically instantiate createClient with right options
-  // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
-  __InternalSupabase: {
-    PostgrestVersion: "14.1"
-  }
   public: {
     Tables: {
       access_requests: {
@@ -54,6 +49,99 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      contracts: {
+        Row: {
+          contract_label: string
+          created_at: string
+          end_date: string | null
+          file_name: string | null
+          file_path: string | null
+          file_size: number | null
+          id: string
+          mime_type: string | null
+          notice_deadline: string | null
+          notes: string | null
+          ocr_extracted_fields: Json
+          ocr_extracted_text: string | null
+          ocr_model: string | null
+          ocr_status: string
+          renewal_notice_days: number | null
+          renewal_period_months: number | null
+          renewal_type: string
+          source_url: string | null
+          start_date: string | null
+          status: string
+          terms_checked_at: string | null
+          terms_status: string
+          terms_summary: string | null
+          terms_url: string | null
+          tool_name: string
+          updated_at: string
+          user_id: string
+          vendor_name: string | null
+        }
+        Insert: {
+          contract_label: string
+          created_at?: string
+          end_date?: string | null
+          file_name?: string | null
+          file_path?: string | null
+          file_size?: number | null
+          id?: string
+          mime_type?: string | null
+          notice_deadline?: string | null
+          notes?: string | null
+          ocr_extracted_fields?: Json
+          ocr_extracted_text?: string | null
+          ocr_model?: string | null
+          ocr_status?: string
+          renewal_notice_days?: number | null
+          renewal_period_months?: number | null
+          renewal_type?: string
+          source_url?: string | null
+          start_date?: string | null
+          status?: string
+          terms_checked_at?: string | null
+          terms_status?: string
+          terms_summary?: string | null
+          terms_url?: string | null
+          tool_name: string
+          updated_at?: string
+          user_id?: string
+          vendor_name?: string | null
+        }
+        Update: {
+          contract_label?: string
+          created_at?: string
+          end_date?: string | null
+          file_name?: string | null
+          file_path?: string | null
+          file_size?: number | null
+          id?: string
+          mime_type?: string | null
+          notice_deadline?: string | null
+          notes?: string | null
+          ocr_extracted_fields?: Json
+          ocr_extracted_text?: string | null
+          ocr_model?: string | null
+          ocr_status?: string
+          renewal_notice_days?: number | null
+          renewal_period_months?: number | null
+          renewal_type?: string
+          source_url?: string | null
+          start_date?: string | null
+          status?: string
+          terms_checked_at?: string | null
+          terms_status?: string
+          terms_summary?: string | null
+          terms_url?: string | null
+          tool_name?: string
+          updated_at?: string
+          user_id?: string
+          vendor_name?: string | null
+        }
+        Relationships: []
       }
       invitations: {
         Row: {
@@ -102,6 +190,10 @@ export type Database = {
           role: string | null
           updated_at: string
           user_id: string
+          slack_token: string | null
+          notion_token: string | null
+          hubspot_token: string | null
+          microsoft_token: string | null
         }
         Insert: {
           avatar_url?: string | null
@@ -113,6 +205,10 @@ export type Database = {
           role?: string | null
           updated_at?: string
           user_id: string
+          slack_token?: string | null
+          notion_token?: string | null
+          hubspot_token?: string | null
+          microsoft_token?: string | null
         }
         Update: {
           avatar_url?: string | null
@@ -124,6 +220,10 @@ export type Database = {
           role?: string | null
           updated_at?: string
           user_id?: string
+          slack_token?: string | null
+          notion_token?: string | null
+          hubspot_token?: string | null
+          microsoft_token?: string | null
         }
         Relationships: []
       }
@@ -200,6 +300,7 @@ export type Database = {
           updated_at: string
           used_seats: number | null
           website_url: string | null
+          user_id: string | null
         }
         Insert: {
           category: string
@@ -214,6 +315,7 @@ export type Database = {
           updated_at?: string
           used_seats?: number | null
           website_url?: string | null
+          user_id?: string | null
         }
         Update: {
           category?: string
@@ -228,8 +330,17 @@ export type Database = {
           updated_at?: string
           used_seats?: number | null
           website_url?: string | null
+          user_id?: string | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "tools_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       user_roles: {
         Row: {
@@ -252,6 +363,143 @@ export type Database = {
         }
         Relationships: []
       }
+      workflow_logs: {
+        Row: {
+          completed_at: string | null
+          error_message: string | null
+          executed_by: string | null
+          id: string
+          input_data: Json | null
+          output_data: Json | null
+          started_at: string | null
+          status: string | null
+          step_id: string | null
+          workflow_id: string | null
+        }
+        Insert: {
+          completed_at?: string | null
+          error_message?: string | null
+          executed_by?: string | null
+          id?: string
+          input_data?: Json | null
+          output_data?: Json | null
+          started_at?: string | null
+          status?: string | null
+          step_id?: string | null
+          workflow_id?: string | null
+        }
+        Update: {
+          completed_at?: string | null
+          error_message?: string | null
+          executed_by?: string | null
+          id?: string
+          input_data?: Json | null
+          output_data?: Json | null
+          started_at?: string | null
+          status?: string | null
+          step_id?: string | null
+          workflow_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "workflow_logs_executed_by_fkey"
+            columns: ["executed_by"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "workflow_logs_step_id_fkey"
+            columns: ["step_id"]
+            isOneToOne: false
+            referencedRelation: "workflow_steps"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "workflow_logs_workflow_id_fkey"
+            columns: ["workflow_id"]
+            isOneToOne: false
+            referencedRelation: "workflows"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      workflow_steps: {
+        Row: {
+          action_id: string | null
+          configuration: Json | null
+          created_at: string
+          id: string
+          name: string
+          order_index: number
+          updated_at: string
+          workflow_id: string
+        }
+        Insert: {
+          action_id?: string | null
+          configuration?: Json | null
+          created_at?: string
+          id?: string
+          name: string
+          order_index: number
+          updated_at?: string
+          workflow_id: string
+        }
+        Update: {
+          action_id?: string | null
+          configuration?: Json | null
+          created_at?: string
+          id?: string
+          name?: string
+          order_index?: number
+          updated_at?: string
+          workflow_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "workflow_steps_workflow_id_fkey"
+            columns: ["workflow_id"]
+            isOneToOne: false
+            referencedRelation: "workflows"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      workflow_variables: {
+        Row: {
+          created_at: string | null
+          id: string
+          name: string
+          value_options: Json | null
+          variable_type: string
+          workflow_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          id?: string
+          name: string
+          value_options?: Json | null
+          variable_type: string
+          workflow_id: string
+        }
+        Update: {
+          created_at?: string | null
+          id?: string
+          name?: string
+          value_options?: Json | null
+          variable_type?: string
+          workflow_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "workflow_variables_workflow_id_fkey"
+            columns: ["workflow_id"]
+            isOneToOne: false
+            referencedRelation: "workflows"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       workflows: {
         Row: {
           created_at: string
@@ -262,6 +510,7 @@ export type Database = {
           steps: Json | null
           type: string | null
           updated_at: string
+          user_id: string | null
         }
         Insert: {
           created_at?: string
@@ -272,6 +521,7 @@ export type Database = {
           steps?: Json | null
           type?: string | null
           updated_at?: string
+          user_id?: string | null
         }
         Update: {
           created_at?: string
@@ -282,8 +532,17 @@ export type Database = {
           steps?: Json | null
           type?: string | null
           updated_at?: string
+          user_id?: string | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "workflows_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+        ]
       }
     }
     Views: {
@@ -329,128 +588,3 @@ export type Database = {
     }
   }
 }
-
-type DatabaseWithoutInternals = Omit<Database, "__InternalSupabase">
-
-type DefaultSchema = DatabaseWithoutInternals[Extract<keyof Database, "public">]
-
-export type Tables<
-  DefaultSchemaTableNameOrOptions extends
-    | keyof (DefaultSchema["Tables"] & DefaultSchema["Views"])
-    | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
-    schema: keyof DatabaseWithoutInternals
-  }
-    ? keyof (DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"] &
-        DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Views"])
-    : never = never,
-> = DefaultSchemaTableNameOrOptions extends {
-  schema: keyof DatabaseWithoutInternals
-}
-  ? (DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"] &
-      DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Views"])[TableName] extends {
-      Row: infer R
-    }
-    ? R
-    : never
-  : DefaultSchemaTableNameOrOptions extends keyof (DefaultSchema["Tables"] &
-        DefaultSchema["Views"])
-    ? (DefaultSchema["Tables"] &
-        DefaultSchema["Views"])[DefaultSchemaTableNameOrOptions] extends {
-        Row: infer R
-      }
-      ? R
-      : never
-    : never
-
-export type TablesInsert<
-  DefaultSchemaTableNameOrOptions extends
-    | keyof DefaultSchema["Tables"]
-    | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
-    schema: keyof DatabaseWithoutInternals
-  }
-    ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
-    : never = never,
-> = DefaultSchemaTableNameOrOptions extends {
-  schema: keyof DatabaseWithoutInternals
-}
-  ? DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"][TableName] extends {
-      Insert: infer I
-    }
-    ? I
-    : never
-  : DefaultSchemaTableNameOrOptions extends keyof DefaultSchema["Tables"]
-    ? DefaultSchema["Tables"][DefaultSchemaTableNameOrOptions] extends {
-        Insert: infer I
-      }
-      ? I
-      : never
-    : never
-
-export type TablesUpdate<
-  DefaultSchemaTableNameOrOptions extends
-    | keyof DefaultSchema["Tables"]
-    | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
-    schema: keyof DatabaseWithoutInternals
-  }
-    ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
-    : never = never,
-> = DefaultSchemaTableNameOrOptions extends {
-  schema: keyof DatabaseWithoutInternals
-}
-  ? DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"][TableName] extends {
-      Update: infer U
-    }
-    ? U
-    : never
-  : DefaultSchemaTableNameOrOptions extends keyof DefaultSchema["Tables"]
-    ? DefaultSchema["Tables"][DefaultSchemaTableNameOrOptions] extends {
-        Update: infer U
-      }
-      ? U
-      : never
-    : never
-
-export type Enums<
-  DefaultSchemaEnumNameOrOptions extends
-    | keyof DefaultSchema["Enums"]
-    | { schema: keyof DatabaseWithoutInternals },
-  EnumName extends DefaultSchemaEnumNameOrOptions extends {
-    schema: keyof DatabaseWithoutInternals
-  }
-    ? keyof DatabaseWithoutInternals[DefaultSchemaEnumNameOrOptions["schema"]]["Enums"]
-    : never = never,
-> = DefaultSchemaEnumNameOrOptions extends {
-  schema: keyof DatabaseWithoutInternals
-}
-  ? DatabaseWithoutInternals[DefaultSchemaEnumNameOrOptions["schema"]]["Enums"][EnumName]
-  : DefaultSchemaEnumNameOrOptions extends keyof DefaultSchema["Enums"]
-    ? DefaultSchema["Enums"][DefaultSchemaEnumNameOrOptions]
-    : never
-
-export type CompositeTypes<
-  PublicCompositeTypeNameOrOptions extends
-    | keyof DefaultSchema["CompositeTypes"]
-    | { schema: keyof DatabaseWithoutInternals },
-  CompositeTypeName extends PublicCompositeTypeNameOrOptions extends {
-    schema: keyof DatabaseWithoutInternals
-  }
-    ? keyof DatabaseWithoutInternals[PublicCompositeTypeNameOrOptions["schema"]]["CompositeTypes"]
-    : never = never,
-> = PublicCompositeTypeNameOrOptions extends {
-  schema: keyof DatabaseWithoutInternals
-}
-  ? DatabaseWithoutInternals[PublicCompositeTypeNameOrOptions["schema"]]["CompositeTypes"][CompositeTypeName]
-  : PublicCompositeTypeNameOrOptions extends keyof DefaultSchema["CompositeTypes"]
-    ? DefaultSchema["CompositeTypes"][PublicCompositeTypeNameOrOptions]
-    : never
-
-export const Constants = {
-  public: {
-    Enums: {
-      app_role: ["admin", "manager", "user"],
-    },
-  },
-} as const

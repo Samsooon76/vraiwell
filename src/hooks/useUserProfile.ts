@@ -10,6 +10,12 @@ export interface UserProfile {
   avatar_url: string | null;
   role: string | null;
   onboarding_completed: boolean;
+  company_name?: string;
+  company_size?: string;
+  slack_token?: string | null;
+  notion_token?: string | null;
+  hubspot_token?: string | null;
+  microsoft_token?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -72,19 +78,42 @@ export function useUserProfile() {
     fetchProfile();
   }, [user?.id]);
 
-  const completeOnboarding = async () => {
-    if (!user || !profile) return { error: "No user or profile" };
+  const completeOnboarding = async (companyName?: string, companySize?: string) => {
+    if (!user) return { error: "No user authenticated" };
 
-    const { error } = await supabase
-      .from("profiles")
-      .update({ onboarding_completed: true })
-      .eq("user_id", user.id);
+    try {
+      const updates: any = { onboarding_completed: true };
+      if (companyName) updates.company_name = companyName;
+      if (companySize) updates.company_size = companySize;
 
-    if (!error) {
-      setProfile({ ...profile, onboarding_completed: true });
+      const { error } = await supabase
+        .from("profiles")
+        .update(updates)
+        .eq("user_id", user.id);
+
+      if (error) {
+        console.error("Error updating onboarding status:", error);
+        return { error: error.message };
+      }
+
+      // If profile state exists, update it locally too
+      if (profile) {
+        setProfile({
+          ...profile,
+          onboarding_completed: true,
+          company_name: companyName || profile.company_name,
+          company_size: companySize || profile.company_size
+        });
+      } else {
+        // If profile wasn't loaded, try to fetch it now to ensure state is consistent
+        await fetchProfile();
+      }
+
+      return { error: null };
+    } catch (err: any) {
+      console.error("Unexpected error in completeOnboarding:", err);
+      return { error: err.message || "An unexpected error occurred" };
     }
-
-    return { error: error?.message || null };
   };
 
   const hasRole = (role: 'admin' | 'manager' | 'user'): boolean => {

@@ -26,8 +26,8 @@ interface UserToInvite extends GoogleUser {
 
 export default function Onboarding() {
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
-  const [currentStep, setCurrentStep] = useState(1);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [currentStep, setCurrentStep] = useState(parseInt(searchParams.get("step") || "1"));
   const [companyName, setCompanyName] = useState("");
   const [companySize, setCompanySize] = useState("");
   const [connectedIntegrations, setConnectedIntegrations] = useState<string[]>([]);
@@ -38,33 +38,62 @@ export default function Onboarding() {
   const [usersToInvite, setUsersToInvite] = useState<UserToInvite[]>([]);
   const [isInviting, setIsInviting] = useState(false);
   const [copiedToken, setCopiedToken] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
 
-  const { 
-    isConnecting, 
-    isLoadingUsers, 
-    googleUsers, 
-    connectGoogle, 
+  const {
+    isConnecting,
+    isLoadingUsers,
+    googleUsers,
+    connectGoogle,
     fetchGoogleUsers,
   } = useGoogleAuth();
 
-  const { completeOnboarding } = useUserProfile();
+  const { profile, completeOnboarding } = useUserProfile();
   const { createBulkInvitations, getInvitationLink, createInvitation } = useInvitations();
+
+  // Redirect if onboarding is already completed
+  useEffect(() => {
+    if (profile?.onboarding_completed && !isCheckingAuth) {
+      navigate("/dashboard");
+    }
+
+    // Pre-fill company info if already in profile
+    if (profile && !companyName) {
+      if (profile.company_name) setCompanyName(profile.company_name);
+      if (profile.company_size) setCompanySize(profile.company_size);
+    }
+  }, [profile, isCheckingAuth, navigate]);
+
+  // Sync currentStep with URL
+  useEffect(() => {
+    const step = parseInt(searchParams.get("step") || "1");
+    if (step !== currentStep) {
+      setCurrentStep(step);
+    }
+  }, [searchParams]);
+
+  const updateStep = (newStep: number) => {
+    const params = new URLSearchParams(searchParams);
+    params.set("step", newStep.toString());
+    setSearchParams(params);
+    setCurrentStep(newStep);
+  };
 
   // Check if user signed up with Google and extract company info
   useEffect(() => {
     const checkAuthAndSetup = async () => {
       setIsCheckingAuth(true);
       const { data: { user } } = await supabase.auth.getUser();
-      
+
       if (user) {
         const googleIdentity = user.identities?.find(
           (identity) => identity.provider === "google"
         );
-        
+
         if (googleIdentity) {
           setIsGoogleUser(true);
           setConnectedIntegrations(["Google Workspace"]);
-          
+
           // Extract company name from email domain
           const email = user.email || "";
           const domain = email.split("@")[1];
@@ -73,9 +102,14 @@ export default function Onboarding() {
             const formattedCompany = companyFromDomain.charAt(0).toUpperCase() + companyFromDomain.slice(1);
             setCompanyName(formattedCompany);
           }
-          
+
           // Fetch Google users
           fetchGoogleUsers();
+
+          // If redirected from Google connect, move to step 3
+          if (searchParams.get("connected") === "google") {
+            updateStep(3);
+          }
         }
       }
       setIsCheckingAuth(false);
@@ -103,29 +137,51 @@ export default function Onboarding() {
 
   const handleNext = async () => {
     if (currentStep < steps.length) {
+      // Save data periodically
+      if (currentStep === 1 && companyName) {
+        setIsSaving(true);
+        await supabase
+          .from("profiles")
+          .update({
+            company_name: companyName,
+            company_size: companySize
+          })
+          .eq("user_id", (await supabase.auth.getUser()).data.user?.id);
+        setIsSaving(false);
+      }
+
       // If Google user, skip step 2 (integrations) since already connected
       if (currentStep === 1 && isGoogleUser) {
-        setCurrentStep(3);
+        updateStep(3);
       } else {
-        setCurrentStep(currentStep + 1);
+        updateStep(currentStep + 1);
       }
     } else {
       // Complete onboarding
-      await completeOnboarding();
-      navigate("/dashboard");
+      const { error } = await completeOnboarding(companyName, companySize);
+      if (error) {
+        toast.error("Erreur lors de la finalisation : " + error);
+      } else {
+        toast.success("Onboarding terminé !");
+        navigate("/dashboard");
+      }
     }
   };
 
   const handleSkip = async () => {
     if (currentStep < steps.length) {
       if (currentStep === 1 && isGoogleUser) {
-        setCurrentStep(3);
+        updateStep(3);
       } else {
-        setCurrentStep(currentStep + 1);
+        updateStep(currentStep + 1);
       }
     } else {
-      await completeOnboarding();
-      navigate("/dashboard");
+      const { error } = await completeOnboarding(companyName, companySize);
+      if (error) {
+        toast.error("Erreur lors de la finalisation : " + error);
+      } else {
+        navigate("/dashboard");
+      }
     }
   };
 
@@ -184,7 +240,7 @@ export default function Onboarding() {
         setUsersToInvite(prev =>
           prev.map(u => u.id === user.id ? { ...u, isInvited: true } : u)
         );
-        
+
         const link = getInvitationLink(invitation.token);
         await navigator.clipboard.writeText(link);
         setCopiedToken(user.id);
@@ -225,10 +281,10 @@ export default function Onboarding() {
       description: "Gmail, Drive, Calendar et plus",
       icon: (
         <svg className="h-6 w-6" viewBox="0 0 24 24">
-          <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
-          <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
-          <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
-          <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+          <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+          <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+          <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" />
+          <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
         </svg>
       ),
     },
@@ -237,10 +293,10 @@ export default function Onboarding() {
       description: "Outlook, Teams, OneDrive et plus",
       icon: (
         <svg className="h-6 w-6" viewBox="0 0 24 24">
-          <path fill="#F25022" d="M1 1h10v10H1z"/>
-          <path fill="#00A4EF" d="M1 13h10v10H1z"/>
-          <path fill="#7FBA00" d="M13 1h10v10H13z"/>
-          <path fill="#FFB900" d="M13 13h10v10H13z"/>
+          <path fill="#F25022" d="M1 1h10v10H1z" />
+          <path fill="#00A4EF" d="M1 13h10v10H1z" />
+          <path fill="#7FBA00" d="M13 1h10v10H13z" />
+          <path fill="#FFB900" d="M13 13h10v10H13z" />
         </svg>
       ),
     },
@@ -249,10 +305,10 @@ export default function Onboarding() {
       description: "Synchronisez vos canaux et notifications",
       icon: (
         <svg className="h-6 w-6" viewBox="0 0 24 24">
-          <path fill="#E01E5A" d="M5.042 15.165a2.528 2.528 0 0 1-2.52 2.523A2.528 2.528 0 0 1 0 15.165a2.527 2.527 0 0 1 2.522-2.52h2.52v2.52zm1.271 0a2.527 2.527 0 0 1 2.521-2.52 2.527 2.527 0 0 1 2.521 2.52v6.313A2.528 2.528 0 0 1 8.834 24a2.528 2.528 0 0 1-2.521-2.522v-6.313z"/>
-          <path fill="#36C5F0" d="M8.834 5.042a2.528 2.528 0 0 1-2.521-2.52A2.528 2.528 0 0 1 8.834 0a2.528 2.528 0 0 1 2.521 2.522v2.52H8.834zm0 1.271a2.528 2.528 0 0 1 2.521 2.521 2.528 2.528 0 0 1-2.521 2.521H2.522A2.528 2.528 0 0 1 0 8.834a2.528 2.528 0 0 1 2.522-2.521h6.312z"/>
-          <path fill="#2EB67D" d="M18.956 8.834a2.528 2.528 0 0 1 2.522-2.521A2.528 2.528 0 0 1 24 8.834a2.528 2.528 0 0 1-2.522 2.521h-2.522V8.834zm-1.272 0a2.528 2.528 0 0 1-2.521 2.521 2.528 2.528 0 0 1-2.521-2.521V2.522A2.528 2.528 0 0 1 15.163 0a2.528 2.528 0 0 1 2.521 2.522v6.312z"/>
-          <path fill="#ECB22E" d="M15.163 18.956a2.528 2.528 0 0 1 2.521 2.522A2.528 2.528 0 0 1 15.163 24a2.528 2.528 0 0 1-2.521-2.522v-2.522h2.521zm0-1.272a2.528 2.528 0 0 1-2.521-2.521 2.528 2.528 0 0 1 2.521-2.521h6.315A2.528 2.528 0 0 1 24 15.163a2.528 2.528 0 0 1-2.522 2.521h-6.315z"/>
+          <path fill="#E01E5A" d="M5.042 15.165a2.528 2.528 0 0 1-2.52 2.523A2.528 2.528 0 0 1 0 15.165a2.527 2.527 0 0 1 2.522-2.52h2.52v2.52zm1.271 0a2.527 2.527 0 0 1 2.521-2.52 2.527 2.527 0 0 1 2.521 2.52v6.313A2.528 2.528 0 0 1 8.834 24a2.528 2.528 0 0 1-2.521-2.522v-6.313z" />
+          <path fill="#36C5F0" d="M8.834 5.042a2.528 2.528 0 0 1-2.521-2.52A2.528 2.528 0 0 1 8.834 0a2.528 2.528 0 0 1 2.521 2.522v2.52H8.834zm0 1.271a2.528 2.528 0 0 1 2.521 2.521 2.528 2.528 0 0 1-2.521 2.521H2.522A2.528 2.528 0 0 1 0 8.834a2.528 2.528 0 0 1 2.522-2.521h6.312z" />
+          <path fill="#2EB67D" d="M18.956 8.834a2.528 2.528 0 0 1 2.522-2.521A2.528 2.528 0 0 1 24 8.834a2.528 2.528 0 0 1-2.522 2.521h-2.522V8.834zm-1.272 0a2.528 2.528 0 0 1-2.521 2.521 2.528 2.528 0 0 1-2.521-2.521V2.522A2.528 2.528 0 0 1 15.163 0a2.528 2.528 0 0 1 2.521 2.522v6.312z" />
+          <path fill="#ECB22E" d="M15.163 18.956a2.528 2.528 0 0 1 2.521 2.522A2.528 2.528 0 0 1 15.163 24a2.528 2.528 0 0 1-2.521-2.522v-2.522h2.521zm0-1.272a2.528 2.528 0 0 1-2.521-2.521 2.528 2.528 0 0 1 2.521-2.521h6.315A2.528 2.528 0 0 1 24 15.163a2.528 2.528 0 0 1-2.522 2.521h-6.315z" />
         </svg>
       ),
     },
@@ -289,22 +345,20 @@ export default function Onboarding() {
             {steps.map((step) => (
               <div
                 key={step.id}
-                className={`flex items-center gap-3 p-3 rounded-lg transition-colors ${
-                  currentStep === step.id
-                    ? "bg-accent text-accent-foreground"
-                    : currentStep > step.id
+                className={`flex items-center gap-3 p-3 rounded-lg transition-colors ${currentStep === step.id
+                  ? "bg-accent text-accent-foreground"
+                  : currentStep > step.id
                     ? "text-muted-foreground"
                     : "text-muted-foreground/60"
-                }`}
+                  }`}
               >
                 <div
-                  className={`flex h-7 w-7 items-center justify-center rounded-full text-xs font-medium transition-colors ${
-                    currentStep > step.id
-                      ? "bg-primary text-primary-foreground"
-                      : currentStep === step.id
+                  className={`flex h-7 w-7 items-center justify-center rounded-full text-xs font-medium transition-colors ${currentStep > step.id
+                    ? "bg-primary text-primary-foreground"
+                    : currentStep === step.id
                       ? "bg-primary text-primary-foreground"
                       : "bg-muted text-muted-foreground"
-                  }`}
+                    }`}
                 >
                   {currentStep > step.id ? <Check className="h-3.5 w-3.5" /> : step.id}
                 </div>
@@ -365,6 +419,7 @@ export default function Onboarding() {
                         placeholder="Acme Inc."
                         value={companyName}
                         onChange={(e) => setCompanyName(e.target.value)}
+                        autoComplete="organization"
                       />
                     </div>
 
@@ -375,11 +430,10 @@ export default function Onboarding() {
                           <button
                             key={size.value}
                             onClick={() => setCompanySize(size.value)}
-                            className={`p-3 rounded-lg border text-sm text-left transition-colors ${
-                              companySize === size.value
-                                ? "border-primary bg-accent text-accent-foreground"
-                                : "border-border hover:border-primary/50 hover:bg-accent/50"
-                            }`}
+                            className={`p-3 rounded-lg border text-sm text-left transition-colors ${companySize === size.value
+                              ? "border-primary bg-accent text-accent-foreground"
+                              : "border-border hover:border-primary/50 hover:bg-accent/50"
+                              }`}
                           >
                             {size.label}
                           </button>
@@ -423,11 +477,10 @@ export default function Onboarding() {
                           key={integration.name}
                           onClick={() => handleIntegrationClick(integration.name)}
                           disabled={isLoading}
-                          className={`w-full flex items-center gap-4 p-4 rounded-xl border text-left transition-all disabled:opacity-50 ${
-                            isConnected
-                              ? "border-primary bg-accent"
-                              : "border-border hover:border-primary/50 hover:bg-accent/50"
-                          }`}
+                          className={`w-full flex items-center gap-4 p-4 rounded-xl border text-left transition-all disabled:opacity-50 ${isConnected
+                            ? "border-primary bg-accent"
+                            : "border-border hover:border-primary/50 hover:bg-accent/50"
+                            }`}
                         >
                           <div className="flex-shrink-0">{integration.icon}</div>
                           <div className="flex-1 min-w-0">
@@ -507,7 +560,7 @@ export default function Onboarding() {
                       Invitez votre équipe
                     </h1>
                     <p className="text-body-md text-muted-foreground">
-                      {isGoogleUser 
+                      {isGoogleUser
                         ? "Sélectionnez les membres à inviter et leur rôle."
                         : "Invitez vos collaborateurs par email."}
                     </p>
@@ -523,13 +576,12 @@ export default function Onboarding() {
                       ) : usersToInvite.length > 0 ? (
                         <div className="space-y-2 max-h-[350px] overflow-y-auto pr-2">
                           {usersToInvite.map((user) => (
-                            <div 
-                              key={user.id} 
-                              className={`flex items-center gap-3 p-3 rounded-lg border transition-colors ${
-                                user.isInvited 
-                                  ? "border-primary/50 bg-primary/5" 
-                                  : "border-border bg-background hover:bg-accent/50"
-                              }`}
+                            <div
+                              key={user.id}
+                              className={`flex items-center gap-3 p-3 rounded-lg border transition-colors ${user.isInvited
+                                ? "border-primary/50 bg-primary/5"
+                                : "border-border bg-background hover:bg-accent/50"
+                                }`}
                             >
                               {user.avatar ? (
                                 <img
@@ -550,7 +602,7 @@ export default function Onboarding() {
                                 </p>
                                 <p className="text-xs text-muted-foreground truncate">{user.email}</p>
                               </div>
-                              
+
                               {user.isInvited ? (
                                 <div className="flex items-center gap-2 text-primary">
                                   <CheckCircle2 className="h-4 w-4" />
@@ -571,7 +623,7 @@ export default function Onboarding() {
                                       <SelectItem value="admin">Admin</SelectItem>
                                     </SelectContent>
                                   </Select>
-                                  
+
                                   <Button
                                     size="sm"
                                     variant="outline"
@@ -585,7 +637,7 @@ export default function Onboarding() {
                                       <Copy className="h-3.5 w-3.5" />
                                     )}
                                   </Button>
-                                  
+
                                   <Button
                                     size="sm"
                                     className="h-8"
@@ -642,8 +694,8 @@ export default function Onboarding() {
                             </SelectContent>
                           </Select>
                         </div>
-                        <Button 
-                          onClick={handleInviteFromEmails} 
+                        <Button
+                          onClick={handleInviteFromEmails}
                           disabled={isInviting || !inviteEmails.trim()}
                           className="mt-6"
                         >
@@ -661,9 +713,13 @@ export default function Onboarding() {
               <Button variant="ghost" onClick={handleSkip}>
                 {currentStep === steps.length ? "Passer" : "Passer cette étape"}
               </Button>
-              <Button onClick={handleNext}>
-                {currentStep === steps.length ? "Terminer" : "Continuer"}
-                <ArrowRight className="h-4 w-4" />
+              <Button onClick={handleNext} disabled={isSaving}>
+                {isSaving ? (
+                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                ) : (
+                  currentStep === steps.length ? "Terminer" : "Continuer"
+                )}
+                {!isSaving && <ArrowRight className="h-4 w-4 ml-2" />}
               </Button>
             </div>
           </div>

@@ -9,7 +9,11 @@ import { Input } from "@/components/ui/input";
 import { RequestToolModal } from "@/components/modals/RequestToolModal";
 import { ToolDetailsModal } from "@/components/modals/ToolDetailsModal";
 import { AccessRequestModal } from "@/components/modals/AccessRequestModal";
-import { supabase } from "@/integrations/supabase/client";
+import { useGoogleAuth } from "@/hooks/useGoogleAuth";
+import { useSlackAuth } from "@/hooks/useSlackAuth";
+import { useNotionAuth } from "@/hooks/useNotionAuth";
+import { useHubSpotAuth } from "@/hooks/useHubSpotAuth";
+import { useAuth } from "@/hooks/useAuth";
 
 const categories = ["Tous", "CRM", "Communication", "Productivité", "Développement", "Design", "RH"];
 
@@ -23,63 +27,142 @@ export default function Dashboard() {
   const [tools, setTools] = useState<Tool[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Check connected integrations and add them to tools
+  const { fetchGoogleUsers, googleUsers, licenseInfo: googleLicenseInfo } = useGoogleAuth();
+  const { hasToken: isSlackConnected } = useSlackAuth();
+  const { hasToken: isNotionConnected } = useNotionAuth();
+  const { hasToken: isHubSpotConnected, hubspotUsers } = useHubSpotAuth();
+  const { user } = useAuth();
+
+  // Check connections using cached user data (instant) and fetch Google users if connected
   useEffect(() => {
-    const loadConnectedTools = async () => {
-      setIsLoading(true);
-      const connectedTools: Tool[] = [];
-      
-      try {
-        // Check Google connection directly
-        const { data: { user } } = await supabase.auth.getUser();
-        
-        if (user) {
-          const googleIdentity = user.identities?.find(
-            (identity) => identity.provider === "google"
-          );
-          
-          if (googleIdentity) {
-            connectedTools.push({
-              id: "google-workspace",
-              name: "Google Workspace",
-              description: "Suite bureautique cloud - Gmail, Drive, Calendar, Meet",
-              icon: "google",
-              category: "Productivité",
-              status: "active",
-              monthlySpend: 0,
-              seats: 1,
-              usedSeats: 1,
-            });
-          }
-          
-          const microsoftIdentity = user.identities?.find(
-            (identity) => identity.provider === "azure"
-          );
-          
-          if (microsoftIdentity) {
-            connectedTools.push({
-              id: "microsoft-365",
-              name: "Microsoft 365",
-              description: "Suite Microsoft - Outlook, OneDrive, Teams, Office",
-              icon: "microsoft",
-              category: "Productivité",
-              status: "active",
-              monthlySpend: 0,
-              seats: 1,
-              usedSeats: 1,
-            });
-          }
-        }
-      } catch (error) {
-        console.error("Error loading connected tools:", error);
-      }
-      
-      setTools(connectedTools);
+    if (!user) {
       setIsLoading(false);
-    };
-    
-    loadConnectedTools();
-  }, []);
+      return;
+    }
+
+    // Check identities from cached user data (no network call!)
+    const googleIdentity = user.identities?.find(i => i.provider === "google");
+    const microsoftIdentity = user.identities?.find(i => i.provider === "azure");
+
+    // Check localStorage for disabled state
+    const googleDisabled = localStorage.getItem("google_workspace_disabled") === user.id;
+
+    const isGoogleConnected = !!googleIdentity && !googleDisabled;
+    const isMicrosoftConnected = !!microsoftIdentity;
+
+    // Build initial tools list immediately (no waiting)
+    const initialTools: Tool[] = [];
+
+    if (isMicrosoftConnected) {
+      initialTools.push({
+        id: "microsoft-365",
+        name: "Microsoft 365",
+        description: "Suite Microsoft - Outlook, OneDrive, Teams, Office",
+        icon: "microsoft",
+        category: "Productivité",
+        status: "active",
+        monthlySpend: 0,
+        seats: 1,
+        usedSeats: 1,
+      });
+    }
+
+    if (isSlackConnected) {
+      initialTools.push({
+        id: "slack",
+        name: "Slack",
+        description: "Communication d'équipe en temps réel",
+        icon: "slack",
+        category: "Communication",
+        status: "active",
+        monthlySpend: 0,
+        seats: 0,
+        usedSeats: 0,
+      });
+    }
+
+    if (isNotionConnected) {
+      initialTools.push({
+        id: "notion",
+        name: "Notion",
+        description: "Documentation et wiki collaboratif",
+        icon: "notion",
+        category: "Productivité",
+        status: "active",
+        monthlySpend: 0,
+        seats: 0,
+        usedSeats: 0,
+      });
+    }
+
+    if (isHubSpotConnected) {
+      initialTools.push({
+        id: "hubspot",
+        name: "HubSpot",
+        description: "CRM et marketing automation",
+        icon: "hubspot",
+        category: "CRM",
+        status: "active",
+        monthlySpend: 0,
+        seats: hubspotUsers?.length || 0,
+        usedSeats: hubspotUsers?.filter((u: any) => u.isActive)?.length || 0,
+      });
+    }
+
+    // Add Google Workspace immediately if connected (data will update when fetched)
+    if (isGoogleConnected) {
+      initialTools.push({
+        id: "google-workspace",
+        name: "Google Workspace",
+        description: "Suite bureautique cloud - Gmail, Drive, Calendar, Meet",
+        icon: "google",
+        category: "Productivité",
+        status: "active",
+        monthlySpend: 0,
+        seats: 0,
+        usedSeats: 0,
+      });
+    }
+
+    setTools(initialTools);
+    setIsLoading(false);
+
+    // Fetch Google users in background to update seat counts
+    if (isGoogleConnected) {
+      fetchGoogleUsers();
+    }
+  }, [user, isSlackConnected, isNotionConnected, isHubSpotConnected, hubspotUsers]);
+
+  // Update tools when Google data arrives
+  useEffect(() => {
+    if (googleUsers.length > 0 || googleLicenseInfo) {
+      setTools(prev => {
+        // Check if Google Workspace already exists
+        const hasGoogle = prev.some(t => t.id === "google-workspace");
+        if (hasGoogle) {
+          // Update existing
+          return prev.map(t => t.id === "google-workspace" ? {
+            ...t,
+            seats: googleLicenseInfo?.totalUsers || googleUsers.length,
+            usedSeats: googleLicenseInfo?.usedLicenses || googleUsers.length,
+          } : t);
+        } else {
+          // Add new
+          return [...prev, {
+            id: "google-workspace",
+            name: "Google Workspace",
+            description: "Suite bureautique cloud - Gmail, Drive, Calendar, Meet",
+            icon: "google",
+            category: "Productivité",
+            status: "active" as const,
+            monthlySpend: 0,
+            seats: googleLicenseInfo?.totalUsers || googleUsers.length,
+            usedSeats: googleLicenseInfo?.usedLicenses || googleUsers.length,
+          }];
+        }
+      });
+    }
+  }, [googleUsers, googleLicenseInfo]);
 
   const filteredTools = tools.filter((tool) => {
     const matchesSearch = tool.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -137,7 +220,7 @@ export default function Dashboard() {
           />
           <StatsCard
             title="Intégrations"
-            value={0}
+            value={activeTools.length}
             subtitle="connectées"
             icon={LayoutGrid}
           />
@@ -244,11 +327,11 @@ export default function Dashboard() {
           </motion.div>
         )}
       </div>
-      
+
       <RequestToolModal open={requestToolOpen} onOpenChange={setRequestToolOpen} />
-      <ToolDetailsModal 
-        tool={selectedTool} 
-        open={detailsOpen} 
+      <ToolDetailsModal
+        tool={selectedTool}
+        open={detailsOpen}
         onOpenChange={setDetailsOpen}
         onRequestAccess={(id) => {
           setDetailsOpen(false);
@@ -259,10 +342,10 @@ export default function Dashboard() {
           }
         }}
       />
-      <AccessRequestModal 
-        tool={selectedTool} 
-        open={accessRequestOpen} 
-        onOpenChange={setAccessRequestOpen} 
+      <AccessRequestModal
+        tool={selectedTool}
+        open={accessRequestOpen}
+        onOpenChange={setAccessRequestOpen}
       />
     </DashboardLayout>
   );

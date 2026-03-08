@@ -46,19 +46,32 @@ serve(async (req) => {
       );
     }
 
-    // Check if user is admin
-    const { data: roleData } = await supabase
+    // Check if user is admin or manager (cast role to text to handle ENUM)
+    const { data: roleData, error: roleError } = await supabase
       .from("user_roles")
       .select("role")
       .eq("user_id", user.id)
-      .eq("role", "admin")
-      .single();
+      .in("role", ["admin", "manager"]);
 
-    if (!roleData) {
-      return new Response(
-        JSON.stringify({ error: "Admin access required" }),
-        { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+    console.log("Role check result:", { roleData, roleError, userId: user.id });
+
+    // Allow if user has admin/manager role OR if they are the first user (no roles exist yet)
+    if (!roleData || roleData.length === 0) {
+      // Check if there are ANY roles in the system
+      const { data: anyRoles } = await supabase
+        .from("user_roles")
+        .select("id")
+        .limit(1);
+
+      if (anyRoles && anyRoles.length > 0) {
+        // There are roles but user doesn't have admin/manager
+        return new Response(
+          JSON.stringify({ error: "Admin or manager access required. You don't have the necessary permissions." }),
+          { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+      // No roles exist yet - this is the first user, allow them
+      console.log("First user detected, allowing action without role check");
     }
 
     // Get user identity to extract domain
@@ -109,7 +122,7 @@ serve(async (req) => {
 
       const emailUsername = `${normalizeForEmail(firstName)}.${normalizeForEmail(lastName)}`;
       const email = `${emailUsername}@${domain}`;
-      
+
       // Generate a temporary random password (required by API but user will set their own via invitation)
       const tempPassword = crypto.randomUUID() + "Aa1!";
 
@@ -144,7 +157,7 @@ serve(async (req) => {
       if (!createResponse.ok) {
         const errorData = await createResponse.json();
         console.error("Google API error:", errorData);
-        
+
         let errorMessage = "Failed to create user";
         if (errorData.error?.message) {
           if (errorData.error.message.includes("Entity already exists")) {
@@ -206,7 +219,7 @@ serve(async (req) => {
       if (!deleteResponse.ok) {
         const errorText = await deleteResponse.text();
         console.error("Google API delete error:", errorText);
-        
+
         let errorMessage = "Failed to delete user";
         try {
           const errorData = JSON.parse(errorText);

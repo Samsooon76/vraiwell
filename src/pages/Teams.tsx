@@ -4,13 +4,15 @@ import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { 
-  Users, 
-  Plus, 
-  Search, 
+import {
+  Users,
+  Plus,
+  Search,
   MoreHorizontal,
   Mail,
-  UserPlus
+  UserPlus,
+  Loader2,
+  Crown
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -19,29 +21,32 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { AddTeamModal } from "@/components/modals/AddTeamModal";
-
-interface Team {
-  id: string;
-  name: string;
-  description: string;
-  color: string;
-  memberCount: number;
-  lead?: string;
-}
-
-// Empty initial state
-const initialTeams: Team[] = [];
+import { TeamDetailsModal } from "@/components/modals/TeamDetailsModal";
+import { useTeams, Team } from "@/hooks/useTeams";
 
 export default function Teams() {
   const [searchQuery, setSearchQuery] = useState("");
   const [addTeamOpen, setAddTeamOpen] = useState(false);
-  const [teams] = useState<Team[]>(initialTeams);
+  const [selectedTeam, setSelectedTeam] = useState<Team | null>(null);
+  const [detailsOpen, setDetailsOpen] = useState(false);
+
+  const { teams, isLoading, fetchTeams, createTeam } = useTeams();
 
   const filteredTeams = teams.filter((team) =>
     team.name.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  const totalMembers = teams.reduce((sum, team) => sum + team.memberCount, 0);
+  const totalMembers = teams.reduce((sum, team) => sum + (team.memberCount || 0), 0);
+
+  const handleTeamClick = (team: Team) => {
+    setSelectedTeam(team);
+    setDetailsOpen(true);
+  };
+
+  const handleTeamDeleted = () => {
+    setSelectedTeam(null);
+    fetchTeams();
+  };
 
   return (
     <DashboardLayout>
@@ -124,75 +129,128 @@ export default function Teams() {
           </div>
         </motion.div>
 
-        {/* Teams grid */}
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: 0.3 }}
-          className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3"
-        >
-          {filteredTeams.map((team, index) => (
-            <motion.div
-              key={team.id}
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.1 * index }}
-              className="group rounded-xl border border-border bg-card p-5 shadow-card transition-all duration-200 hover:shadow-card-hover hover:border-primary/20"
-            >
-              <div className="flex items-start justify-between mb-4">
-                <div className="flex items-center gap-3">
-                  <div
-                    className="flex h-10 w-10 items-center justify-center rounded-lg text-white font-semibold"
-                    style={{ backgroundColor: team.color }}
+        {/* Loading state */}
+        {isLoading ? (
+          <div className="flex justify-center py-16">
+            <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+          </div>
+        ) : filteredTeams.length === 0 ? (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="flex flex-col items-center justify-center py-16 text-center"
+          >
+            <Users className="h-12 w-12 text-muted-foreground/50 mb-4" />
+            <h3 className="text-lg font-medium text-foreground mb-2">
+              {teams.length === 0 ? "Aucune équipe" : "Aucun résultat"}
+            </h3>
+            <p className="text-sm text-muted-foreground mb-4">
+              {teams.length === 0
+                ? "Créez votre première équipe pour commencer"
+                : "Essayez une autre recherche"}
+            </p>
+            {teams.length === 0 && (
+              <Button onClick={() => setAddTeamOpen(true)}>
+                <Plus className="h-4 w-4 mr-1" />
+                Créer une équipe
+              </Button>
+            )}
+          </motion.div>
+        ) : (
+          /* Teams grid */
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.3 }}
+            className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3"
+          >
+            {filteredTeams.map((team, index) => (
+              <motion.div
+                key={team.id}
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.1 * index }}
+                className="group rounded-xl border border-border bg-card p-5 shadow-card transition-all duration-200 hover:shadow-card-hover hover:border-primary/20"
+              >
+                <div className="flex items-start justify-between mb-4">
+                  <div className="flex items-center gap-3">
+                    <div
+                      className="flex h-10 w-10 items-center justify-center rounded-lg text-white font-semibold"
+                      style={{ backgroundColor: team.color }}
+                    >
+                      {team.name.charAt(0)}
+                    </div>
+                    <div>
+                      <h3 className="font-display font-semibold text-foreground">{team.name}</h3>
+                      <p className="text-xs text-muted-foreground">{team.memberCount || 0} membres</p>
+                    </div>
+                  </div>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="ghost" size="icon" className="h-8 w-8">
+                        <MoreHorizontal className="h-4 w-4" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem onClick={() => handleTeamClick(team)}>
+                        Voir les détails
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => handleTeamClick(team)}>
+                        Gérer les membres
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
+
+                <p className="text-sm text-muted-foreground mb-4 line-clamp-2">
+                  {team.description || "Aucune description"}
+                </p>
+
+                {team.lead && (
+                  <div className="flex items-center gap-2">
+                    <Badge variant="outline" className="text-xs">
+                      <Crown className="h-3 w-3 mr-1 text-amber-500" />
+                      {team.lead}
+                    </Badge>
+                  </div>
+                )}
+
+                <div className="mt-4 pt-4 border-t border-border flex gap-2">
+                  <Button
+                    variant="soft"
+                    size="sm"
+                    className="flex-1"
+                    onClick={() => handleTeamClick(team)}
                   >
-                    {team.name.charAt(0)}
-                  </div>
-                  <div>
-                    <h3 className="font-display font-semibold text-foreground">{team.name}</h3>
-                    <p className="text-xs text-muted-foreground">{team.memberCount} membres</p>
-                  </div>
+                    <Users className="h-4 w-4" />
+                    Voir membres
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleTeamClick(team)}
+                  >
+                    <UserPlus className="h-4 w-4" />
+                  </Button>
                 </div>
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button variant="ghost" size="icon" className="h-8 w-8">
-                      <MoreHorizontal className="h-4 w-4" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    <DropdownMenuItem>Modifier</DropdownMenuItem>
-                    <DropdownMenuItem>Gérer les membres</DropdownMenuItem>
-                    <DropdownMenuItem className="text-destructive">Supprimer</DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </div>
-
-              <p className="text-sm text-muted-foreground mb-4 line-clamp-2">
-                {team.description}
-              </p>
-
-              {team.lead && (
-                <div className="flex items-center gap-2">
-                  <Badge variant="outline" className="text-xs">
-                    Lead: {team.lead}
-                  </Badge>
-                </div>
-              )}
-
-              <div className="mt-4 pt-4 border-t border-border flex gap-2">
-                <Button variant="soft" size="sm" className="flex-1">
-                  <Users className="h-4 w-4" />
-                  Voir membres
-                </Button>
-                <Button variant="outline" size="sm">
-                  <UserPlus className="h-4 w-4" />
-                </Button>
-              </div>
-            </motion.div>
-          ))}
-        </motion.div>
+              </motion.div>
+            ))}
+          </motion.div>
+        )}
       </div>
-      
-      <AddTeamModal open={addTeamOpen} onOpenChange={setAddTeamOpen} />
+
+      <AddTeamModal
+        open={addTeamOpen}
+        onOpenChange={setAddTeamOpen}
+        onCreateTeam={createTeam}
+      />
+
+      <TeamDetailsModal
+        open={detailsOpen}
+        onOpenChange={setDetailsOpen}
+        team={selectedTeam}
+        onTeamDeleted={handleTeamDeleted}
+      />
     </DashboardLayout>
   );
 }
