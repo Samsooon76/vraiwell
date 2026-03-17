@@ -9,12 +9,16 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { useOnOffAuth } from "@/hooks/useOnOffAuth";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { useOnOffAuth, type OnOffNumber } from "@/hooks/useOnOffAuth";
 import { ConfirmModal } from "./ConfirmModal";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import {
   AlertCircle,
   ExternalLink,
+  UserPlus,
   KeyRound,
   Loader2,
   RefreshCw,
@@ -23,6 +27,7 @@ import {
   Unlink,
   Users,
   Smartphone,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -40,6 +45,16 @@ export function OnOffWorkspaceModal({
   const [apiKeyInput, setApiKeyInput] = useState("");
   const [search, setSearch] = useState("");
   const [showApiKeyForm, setShowApiKeyForm] = useState(false);
+  const [showAddMemberForm, setShowAddMemberForm] = useState(false);
+  const [newMemberFirstName, setNewMemberFirstName] = useState("");
+  const [newMemberLastName, setNewMemberLastName] = useState("");
+  const [newMemberEmail, setNewMemberEmail] = useState("");
+  const [newMemberRole, setNewMemberRole] = useState<"ROLE_USER" | "ROLE_ADMIN">("ROLE_USER");
+  const [assignNumberOnCreate, setAssignNumberOnCreate] = useState(false);
+  const [newMemberCountryCode, setNewMemberCountryCode] = useState("fr");
+  const [availableNumbers, setAvailableNumbers] = useState<OnOffNumber[]>([]);
+  const [selectedAvailableNumberId, setSelectedAvailableNumberId] = useState("");
+  const [isLoadingAvailableNumbers, setIsLoadingAvailableNumbers] = useState(false);
   const [confirmDisconnectOpen, setConfirmDisconnectOpen] = useState(false);
   const [memberToDelete, setMemberToDelete] = useState<{ id: string; name: string } | null>(null);
   const [openMemberId, setOpenMemberId] = useState("");
@@ -48,6 +63,9 @@ export function OnOffWorkspaceModal({
     setApiKey,
     fetchOnOffMembers,
     fetchOnOffNumbers,
+    fetchAvailableOnOffNumbers,
+    createOnOffMember,
+    assignOnOffNumber,
     deleteOnOffMember,
     disconnectOnOff,
     members,
@@ -55,6 +73,8 @@ export function OnOffWorkspaceModal({
     workspaceInfo,
     isConnecting,
     isLoadingMembers,
+    isCreatingMember,
+    isAssigningNumber,
     isDisconnecting,
     hasToken,
     error,
@@ -62,11 +82,25 @@ export function OnOffWorkspaceModal({
     deletingMemberId,
   } = useOnOffAuth();
 
+  const resetAddMemberForm = () => {
+    setShowAddMemberForm(false);
+    setNewMemberFirstName("");
+    setNewMemberLastName("");
+    setNewMemberEmail("");
+    setNewMemberRole("ROLE_USER");
+    setAssignNumberOnCreate(false);
+    setNewMemberCountryCode("fr");
+    setAvailableNumbers([]);
+    setSelectedAvailableNumberId("");
+    setIsLoadingAvailableNumbers(false);
+  };
+
   useEffect(() => {
     if (!open) {
       setApiKeyInput("");
       setSearch("");
       setShowApiKeyForm(false);
+      resetAddMemberForm();
       setOpenMemberId("");
       return;
     }
@@ -132,6 +166,114 @@ export function OnOffWorkspaceModal({
     }
 
     toast.error(result.error || "Impossible de supprimer le membre OnOff");
+  };
+
+  const handleLoadAvailableNumbers = async () => {
+    const normalizedCountryCode = newMemberCountryCode.trim().toLowerCase();
+
+    if (!normalizedCountryCode) {
+      toast.error("Veuillez renseigner un code pays OnOff");
+      return;
+    }
+
+    setIsLoadingAvailableNumbers(true);
+
+    try {
+      const result = await fetchAvailableOnOffNumbers(normalizedCountryCode);
+
+      if (!result.success) {
+        toast.error(result.error || "Impossible de récupérer les numéros disponibles");
+        return;
+      }
+
+      const fetchedNumbers = result.numbers || [];
+      setAvailableNumbers(fetchedNumbers);
+      setSelectedAvailableNumberId((current) => {
+        if (current && fetchedNumbers.some((number) => number.id === current)) {
+          return current;
+        }
+
+        return fetchedNumbers[0]?.id ?? "";
+      });
+
+      if (fetchedNumbers.length === 0) {
+        const attemptedQueries = Array.isArray(result.meta?.attemptedQueries)
+          ? result.meta.attemptedQueries
+            .map((entry: { countryCode?: string | null }) => entry.countryCode ?? "sans countryCode")
+            .join(", ")
+          : normalizedCountryCode;
+
+        toast.error(`Aucun numéro disponible pour ${attemptedQueries}`);
+      }
+    } finally {
+      setIsLoadingAvailableNumbers(false);
+    }
+  };
+
+  const handleCreateMember = async () => {
+    if (!newMemberFirstName.trim() || !newMemberLastName.trim() || !newMemberEmail.trim()) {
+      toast.error("Veuillez renseigner le prénom, le nom et l'email");
+      return;
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(newMemberEmail.trim())) {
+      toast.error("Veuillez entrer une adresse email valide");
+      return;
+    }
+
+    if (assignNumberOnCreate && !selectedAvailableNumberId) {
+      toast.error("Sélectionnez un numéro disponible ou désactivez l'attribution de numéro");
+      return;
+    }
+
+    const createResult = await createOnOffMember({
+      firstName: newMemberFirstName.trim(),
+      lastName: newMemberLastName.trim(),
+      email: newMemberEmail.trim(),
+      role: newMemberRole,
+    });
+
+    if (!createResult.success || !createResult.member) {
+      toast.error(createResult.error || "Impossible de créer le membre OnOff");
+      return;
+    }
+
+    const createdMember = createResult.member;
+    let assignedPhoneNumber: string | null = null;
+
+    if (assignNumberOnCreate) {
+      const selectedNumber = availableNumbers.find((number) => number.id === selectedAvailableNumberId);
+
+      if (!selectedNumber) {
+        toast.error("Membre créé, mais le numéro sélectionné n'est plus disponible");
+      } else {
+        const assignResult = await assignOnOffNumber({
+          phoneNumber: selectedNumber.phoneNumber,
+          memberIdRef: createdMember.id,
+          numberId: selectedNumber.id,
+          number: {
+            ...selectedNumber,
+            memberIdRef: createdMember.id,
+          },
+        });
+
+        if (!assignResult.success) {
+          toast.error(assignResult.error || "Membre créé, mais l'attribution du numéro a échoué");
+        } else {
+          assignedPhoneNumber = selectedNumber.phoneNumber;
+        }
+      }
+    }
+
+    setOpenMemberId(createdMember.id);
+    resetAddMemberForm();
+
+    toast.success(
+      assignedPhoneNumber
+        ? `Membre créé et numéro ${assignedPhoneNumber} attribué`
+        : `Membre ${createdMember.name} créé avec succès`,
+    );
   };
 
   const filteredMembers = members.filter((member) => {
@@ -211,11 +353,6 @@ export function OnOffWorkspaceModal({
                 value={apiKeyInput}
                 onChange={(event) => setApiKeyInput(event.target.value)}
               />
-              <p className="text-xs text-muted-foreground">
-                La connexion est validée en appelant
-                {" "}
-                <span className="font-mono text-foreground">GET /api/v1/members</span>.
-              </p>
             </div>
 
             {error && (
@@ -253,11 +390,6 @@ export function OnOffWorkspaceModal({
                     {workspaceInfo?.totalMembers ?? members.length} membres
                   </Badge>
                 </div>
-                <p className="text-sm text-muted-foreground">
-                  Connexion validée avec l'endpoint
-                  {" "}
-                  <span className="font-mono text-foreground">GET /api/v1/members</span>.
-                </p>
               </div>
               <Button type="button" variant="outline" size="sm" onClick={() => setShowApiKeyForm((value) => !value)}>
                 <KeyRound className="h-4 w-4" />
@@ -296,6 +428,172 @@ export function OnOffWorkspaceModal({
                 <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
                 <span>{error}</span>
               </div>
+            )}
+
+            {showAddMemberForm ? (
+              <div className="rounded-xl border border-border p-4 space-y-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-medium text-foreground">Nouveau membre OnOff</p>
+                    <p className="text-xs text-muted-foreground">
+                      Création via `POST /api/v1/members`, avec attribution optionnelle d&apos;un numéro disponible.
+                    </p>
+                  </div>
+                  <Button type="button" variant="ghost" size="sm" onClick={resetAddMemberForm}>
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-2">
+                    <Label htmlFor="onoff-first-name">Prénom</Label>
+                    <Input
+                      id="onoff-first-name"
+                      placeholder="Jean"
+                      value={newMemberFirstName}
+                      onChange={(event) => setNewMemberFirstName(event.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="onoff-last-name">Nom</Label>
+                    <Input
+                      id="onoff-last-name"
+                      placeholder="Dupont"
+                      value={newMemberLastName}
+                      onChange={(event) => setNewMemberLastName(event.target.value)}
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="onoff-email">Email</Label>
+                  <Input
+                    id="onoff-email"
+                    type="email"
+                    placeholder="jean.dupont@entreprise.fr"
+                    value={newMemberEmail}
+                    onChange={(event) => setNewMemberEmail(event.target.value)}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Rôle OnOff</Label>
+                  <Select value={newMemberRole} onValueChange={(value) => setNewMemberRole(value as typeof newMemberRole)}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="ROLE_USER">Utilisateur</SelectItem>
+                      <SelectItem value="ROLE_ADMIN">Admin</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="flex items-start space-x-2">
+                  <Checkbox
+                    id="onoff-assign-number"
+                    checked={assignNumberOnCreate}
+                    onCheckedChange={(checked) => {
+                      const nextChecked = checked === true;
+                      setAssignNumberOnCreate(nextChecked);
+                      if (!nextChecked) {
+                        setAvailableNumbers([]);
+                        setSelectedAvailableNumberId("");
+                      }
+                    }}
+                  />
+                  <div className="space-y-1">
+                    <Label htmlFor="onoff-assign-number" className="text-sm">
+                      Attribuer un numéro à la création
+                    </Label>
+                    <p className="text-xs text-muted-foreground">
+                      La doc OnOff expose une attribution de numéro disponible, pas un endpoint séparé de création de numéro.
+                    </p>
+                  </div>
+                </div>
+
+                {assignNumberOnCreate && (
+                  <div className="rounded-lg border border-border bg-muted/20 p-3 space-y-3">
+                    <div className="grid grid-cols-[120px_1fr] gap-3">
+                      <div className="space-y-2">
+                        <Label htmlFor="onoff-country-code">Code pays</Label>
+                            <Input
+                              id="onoff-country-code"
+                              placeholder="fr"
+                              maxLength={2}
+                              value={newMemberCountryCode}
+                              onChange={(event) => {
+                                setNewMemberCountryCode(event.target.value.toLowerCase());
+                                setAvailableNumbers([]);
+                                setSelectedAvailableNumberId("");
+                              }}
+                            />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Numéro disponible</Label>
+                        <div className="flex gap-2">
+                          <Select
+                            value={selectedAvailableNumberId || undefined}
+                            onValueChange={setSelectedAvailableNumberId}
+                            disabled={isLoadingAvailableNumbers || availableNumbers.length === 0}
+                          >
+                            <SelectTrigger className="flex-1">
+                              <SelectValue placeholder="Chargez les numéros disponibles" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {availableNumbers.map((number) => (
+                                <SelectItem key={number.id} value={number.id}>
+                                  {number.phoneNumber} {number.countryCode ? `(${number.countryCode})` : ""}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => void handleLoadAvailableNumbers()}
+                            disabled={isLoadingAvailableNumbers || !newMemberCountryCode.trim()}
+                          >
+                            {isLoadingAvailableNumbers ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                            Charger
+                          </Button>
+                        </div>
+                      </div>
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          {availableNumbers.length > 0
+                            ? `${availableNumbers.length} numéro(s) disponible(s) pour ${newMemberCountryCode.trim().toLowerCase() || "ce pays"}`
+                            : "Chargez les numéros disponibles avant de valider."}
+                        </p>
+                      </div>
+                )}
+
+                <Button
+                  type="button"
+                  className="w-full"
+                  onClick={() => void handleCreateMember()}
+                  disabled={
+                    isCreatingMember
+                    || isAssigningNumber
+                    || !newMemberFirstName.trim()
+                    || !newMemberLastName.trim()
+                    || !newMemberEmail.trim()
+                    || (assignNumberOnCreate && !selectedAvailableNumberId)
+                  }
+                >
+                  {isCreatingMember || isAssigningNumber ? (
+                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                  ) : (
+                    <UserPlus className="h-4 w-4 mr-2" />
+                  )}
+                  {assignNumberOnCreate ? "Créer le membre et attribuer le numéro" : "Créer le membre"}
+                </Button>
+              </div>
+            ) : (
+              <Button type="button" variant="outline" className="w-full" onClick={() => setShowAddMemberForm(true)}>
+                <UserPlus className="h-4 w-4 mr-2" />
+                Ajouter un membre OnOff
+              </Button>
             )}
 
             <div className="relative">

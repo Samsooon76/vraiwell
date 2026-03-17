@@ -817,6 +817,66 @@ export const ACTION_REGISTRY: Array<Omit<WorkflowAction, 'id'>> = [
     // ============================================
     {
         integration_id: 'onoff',
+        action_key: 'create_member',
+        name: 'Créer un membre OnOff',
+        description: 'Crée un membre OnOff Business avec attribution optionnelle d\'un numéro disponible',
+        icon: null,
+        category: 'user_management',
+        input_schema: {
+            type: 'object',
+            required: ['firstName', 'lastName', 'email'],
+            properties: {
+                firstName: { type: 'string', title: 'Prénom' },
+                lastName: { type: 'string', title: 'Nom' },
+                email: { type: 'string', title: 'Email', format: 'email' },
+                role: {
+                    type: 'string',
+                    title: 'Rôle OnOff',
+                    enum: ['ROLE_USER', 'ROLE_ADMIN'],
+                },
+                assignNumber: {
+                    type: 'boolean',
+                    title: 'Attribuer un numéro',
+                    description: 'Si activé, attribue un numéro existant ou le premier numéro disponible du pays indiqué',
+                    default: false,
+                },
+                countryCode: {
+                    type: 'string',
+                    title: 'Code pays',
+                    description: 'Obligatoire si aucun numéro précis n\'est fourni et que l\'attribution est activée',
+                },
+                phoneNumber: {
+                    type: 'string',
+                    title: 'Numéro à attribuer',
+                    description: 'Optionnel. Si vide, le premier numéro disponible du pays sera utilisé',
+                },
+            },
+        },
+        edge_function: 'manage-onoff-member',
+        execution_action: 'create_member',
+        is_active: true,
+    },
+    {
+        integration_id: 'onoff',
+        action_key: 'assign_number',
+        name: 'Attribuer un numéro OnOff',
+        description: 'Attribue un numéro OnOff existant à un membre',
+        icon: null,
+        category: 'user_management',
+        input_schema: {
+            type: 'object',
+            required: ['memberIdRef', 'phoneNumber'],
+            properties: {
+                memberIdRef: { type: 'string', title: 'ID du membre OnOff' },
+                phoneNumber: { type: 'string', title: 'Numéro OnOff à attribuer' },
+            },
+        },
+        edge_function: 'manage-onoff-member',
+        execution_action: 'assign_number',
+        is_active: true,
+    },
+    {
+        integration_id: 'onoff',
         action_key: 'delete_member',
         name: 'Supprimer un membre OnOff',
         description: 'Supprime un membre dans OnOff Business',

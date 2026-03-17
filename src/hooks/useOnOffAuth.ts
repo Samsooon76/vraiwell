@@ -35,6 +35,21 @@ export interface OnOffNumber {
   isLandline?: boolean | null;
 }
 
+export interface CreateOnOffMemberInput {
+  firstName: string;
+  lastName: string;
+  email: string;
+  role?: "ROLE_USER" | "ROLE_ADMIN";
+  departmentIdRefs?: string[];
+}
+
+export interface AssignOnOffNumberInput {
+  phoneNumber: string;
+  memberIdRef: string;
+  numberId?: string;
+  number?: OnOffNumber;
+}
+
 async function getCurrentUserId() {
   const {
     data: { user },
@@ -71,6 +86,92 @@ function getErrorMessage(error: unknown, fallback: string) {
   return error instanceof Error ? error.message : fallback;
 }
 
+function getNestedErrorMessage(value: unknown): string | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const record = value as Record<string, unknown>;
+  const directMessage = typeof record.message === "string" && record.message.trim()
+    ? record.message.trim()
+    : null;
+
+  if (directMessage) {
+    return directMessage;
+  }
+
+  const nestedError = record.error;
+  if (nestedError && typeof nestedError === "object") {
+    const errorRecord = nestedError as Record<string, unknown>;
+    if (typeof errorRecord.message === "string" && errorRecord.message.trim()) {
+      return errorRecord.message.trim();
+    }
+  }
+
+  return null;
+}
+
+function getNestedErrorMetadata(value: unknown) {
+  if (!value || typeof value !== "object") {
+    return { code: null, sequenceNumber: null };
+  }
+
+  const record = value as Record<string, unknown>;
+  const nestedError = record.error && typeof record.error === "object"
+    ? record.error as Record<string, unknown>
+    : null;
+
+  return {
+    code: typeof nestedError?.code === "string" && nestedError.code.trim()
+      ? nestedError.code.trim()
+      : null,
+    sequenceNumber: typeof nestedError?.sequenceNumber === "string" && nestedError.sequenceNumber.trim()
+      ? nestedError.sequenceNumber.trim()
+      : null,
+  };
+}
+
+function formatAttemptedQueries(value: unknown): string | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const record = value as Record<string, unknown>;
+  const meta = record.meta && typeof record.meta === "object"
+    ? record.meta as Record<string, unknown>
+    : null;
+  const attemptedQueries = Array.isArray(meta?.attemptedQueries)
+    ? meta.attemptedQueries
+    : null;
+
+  if (!attemptedQueries || attemptedQueries.length === 0) {
+    return null;
+  }
+
+  const formattedQueries = attemptedQueries
+    .map((entry) => {
+      if (!entry || typeof entry !== "object") {
+        return null;
+      }
+
+      const query = entry as Record<string, unknown>;
+      const countryCode = typeof query.countryCode === "string" && query.countryCode.trim()
+        ? query.countryCode.trim()
+        : "sans countryCode";
+      const flags = [
+        query.includeLimit === false ? "sans limit" : null,
+        query.includeOffset === false ? "sans offset" : null,
+      ].filter(Boolean).join(", ");
+
+      return flags ? `${countryCode} (${flags})` : countryCode;
+    })
+    .filter((entry): entry is string => !!entry);
+
+  return formattedQueries.length > 0
+    ? formattedQueries.join(" -> ")
+    : null;
+}
+
 async function getFunctionErrorMessage(error: unknown, fallback: string) {
   if (
     error
@@ -94,7 +195,28 @@ async function getFunctionErrorMessage(error: unknown, fallback: string) {
         );
 
         if (parsedMessage !== fallback) {
-          return parsedMessage;
+          const detailsMessage = parsedBody && typeof parsedBody === "object" && "details" in parsedBody
+            ? getNestedErrorMessage((parsedBody as Record<string, unknown>).details)
+            : null;
+          const detailsMetadata = parsedBody && typeof parsedBody === "object" && "details" in parsedBody
+            ? getNestedErrorMetadata((parsedBody as Record<string, unknown>).details)
+            : { code: null, sequenceNumber: null };
+          const attemptedQueries = formatAttemptedQueries(parsedBody);
+          const suffixParts = [
+            detailsMetadata.code ? `code: ${detailsMetadata.code}` : null,
+            detailsMetadata.sequenceNumber ? `trace: ${detailsMetadata.sequenceNumber}` : null,
+            attemptedQueries ? `queries: ${attemptedQueries}` : null,
+          ].filter(Boolean);
+
+          if (detailsMessage && detailsMessage !== parsedMessage) {
+            return suffixParts.length > 0
+              ? `${parsedMessage} (${detailsMessage}; ${suffixParts.join(" | ")})`
+              : `${parsedMessage} (${detailsMessage})`;
+          }
+
+          return suffixParts.length > 0
+            ? `${parsedMessage} (${suffixParts.join(" | ")})`
+            : parsedMessage;
         }
       } catch {
         if (body.trim()) {
@@ -128,6 +250,8 @@ function persistApiKeyLocally(apiKey: string | null) {
 export function useOnOffAuth() {
   const [isConnecting, setIsConnecting] = useState(false);
   const [isLoadingMembers, setIsLoadingMembers] = useState(false);
+  const [isCreatingMember, setIsCreatingMember] = useState(false);
+  const [isAssigningNumber, setIsAssigningNumber] = useState(false);
   const [isDisconnecting, setIsDisconnecting] = useState(false);
   const [hasToken, setHasToken] = useState(false);
   const [members, setMembers] = useState<OnOffMember[]>([]);
@@ -288,6 +412,196 @@ export function useOnOffAuth() {
     }
   }, []);
 
+  const fetchAvailableOnOffNumbers = useCallback(async (countryCode: string, apiKeyOverride?: string) => {
+    const normalizedCountryCode = countryCode.trim().toLowerCase();
+    const apiCountryCode = normalizedCountryCode.toUpperCase();
+    const apiKey = apiKeyOverride ?? await getStoredApiKey();
+
+    if (!apiKey) {
+      setHasToken(false);
+      return { success: false, error: "Clé API OnOff manquante" };
+    }
+
+    if (!normalizedCountryCode) {
+      return { success: false, error: "Code pays OnOff manquant" };
+    }
+
+    setError(null);
+
+    try {
+      const { data, error: fnError } = await supabase.functions.invoke("manage-onoff-member", {
+        body: {
+          action: "list_numbers",
+          api_key: apiKey,
+          status: "available",
+          countryCode: apiCountryCode,
+          limit: 100,
+        },
+      });
+
+      if (fnError) {
+        throw fnError;
+      }
+
+      if (!data?.success) {
+        throw new Error(data?.error || "Impossible de récupérer les numéros disponibles OnOff");
+      }
+
+      const fetchedNumbers = ((data.numbers || []) as OnOffNumber[]).filter((number) => {
+        const identifier = number.id?.trim() || number.phoneNumber?.trim();
+        return !!identifier;
+      }).map((number) => ({
+        ...number,
+        id: number.id?.trim() || number.phoneNumber.trim(),
+      }));
+
+      return {
+        success: true,
+        numbers: fetchedNumbers,
+        meta: data.meta ?? null,
+      };
+    } catch (err: unknown) {
+      const message = await getFunctionErrorMessage(err, "Impossible de récupérer les numéros disponibles OnOff");
+      setError(message);
+      return { success: false, error: message };
+    }
+  }, []);
+
+  const createOnOffMember = useCallback(async ({
+    firstName,
+    lastName,
+    email,
+    role = "ROLE_USER",
+    departmentIdRefs = [],
+  }: CreateOnOffMemberInput) => {
+    const apiKey = await getStoredApiKey();
+
+    if (!apiKey) {
+      setHasToken(false);
+      return { success: false, error: "Clé API OnOff manquante" };
+    }
+
+    setIsCreatingMember(true);
+    setError(null);
+
+    try {
+      const { data, error: fnError } = await supabase.functions.invoke("manage-onoff-member", {
+        body: {
+          action: "create_member",
+          api_key: apiKey,
+          firstName,
+          lastName,
+          email,
+          role,
+          departmentIdRefs,
+        },
+      });
+
+      if (fnError) {
+        throw fnError;
+      }
+
+      if (!data?.success || !data?.member) {
+        throw new Error(data?.error || "Impossible de créer le membre OnOff");
+      }
+
+      const createdMember = data.member as OnOffMember;
+
+      setMembers((current) => {
+        const withoutExistingMember = current.filter((member) => member.id !== createdMember.id);
+        return [createdMember, ...withoutExistingMember];
+      });
+      setWorkspaceInfo((current) => current
+        ? { ...current, totalMembers: current.totalMembers + 1 }
+        : { name: "Onoff Business", totalMembers: 1, nextOffset: null },
+      );
+
+      return { success: true, member: createdMember };
+    } catch (err: unknown) {
+      const message = await getFunctionErrorMessage(err, "Impossible de créer le membre OnOff");
+      setError(message);
+      return { success: false, error: message };
+    } finally {
+      setIsCreatingMember(false);
+    }
+  }, []);
+
+  const assignOnOffNumber = useCallback(async ({
+    phoneNumber,
+    memberIdRef,
+    numberId,
+    number,
+  }: AssignOnOffNumberInput) => {
+    const apiKey = await getStoredApiKey();
+
+    if (!apiKey) {
+      setHasToken(false);
+      return { success: false, error: "Clé API OnOff manquante" };
+    }
+
+    setIsAssigningNumber(true);
+    setError(null);
+
+    try {
+      const { data, error: fnError } = await supabase.functions.invoke("manage-onoff-member", {
+        body: {
+          action: "assign_number",
+          api_key: apiKey,
+          phoneNumber,
+          memberIdRef,
+        },
+      });
+
+      if (fnError) {
+        throw fnError;
+      }
+
+      if (!data?.success) {
+        throw new Error(data?.error || "Impossible d'attribuer le numéro OnOff");
+      }
+
+      const nextNumberId = numberId ?? number?.id ?? phoneNumber;
+
+      setMembers((current) => current.map((member) => {
+        if (member.id !== memberIdRef) {
+          return member;
+        }
+
+        if (member.numberIdRefs.includes(nextNumberId)) {
+          return member;
+        }
+
+        return {
+          ...member,
+          numberIdRefs: [...member.numberIdRefs, nextNumberId],
+        };
+      }));
+
+      if (number) {
+        setNumbersByMember((current) => {
+          const memberNumbers = current[memberIdRef] || [];
+          const filteredNumbers = memberNumbers.filter((item) => item.id !== number.id);
+
+          return {
+            ...current,
+            [memberIdRef]: [
+              ...filteredNumbers,
+              { ...number, memberIdRef },
+            ],
+          };
+        });
+      }
+
+      return { success: true };
+    } catch (err: unknown) {
+      const message = await getFunctionErrorMessage(err, "Impossible d'attribuer le numéro OnOff");
+      setError(message);
+      return { success: false, error: message };
+    } finally {
+      setIsAssigningNumber(false);
+    }
+  }, []);
+
   const deleteOnOffMember = useCallback(async (memberId: string) => {
     const apiKey = await getStoredApiKey();
     if (!apiKey) {
@@ -386,6 +700,8 @@ export function useOnOffAuth() {
   return {
     isConnecting,
     isLoadingMembers,
+    isCreatingMember,
+    isAssigningNumber,
     isDisconnecting,
     hasToken,
     members,
@@ -397,6 +713,9 @@ export function useOnOffAuth() {
     setApiKey,
     fetchOnOffMembers,
     fetchOnOffNumbers,
+    fetchAvailableOnOffNumbers,
+    createOnOffMember,
+    assignOnOffNumber,
     deleteOnOffMember,
     disconnectOnOff,
     checkOnOffConnection,
