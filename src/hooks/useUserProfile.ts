@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { createContext, createElement, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "./useAuth";
 
@@ -24,17 +24,41 @@ export interface UserRole {
   role: 'admin' | 'manager' | 'user';
 }
 
-export function useUserProfile() {
+interface UserProfileContextValue {
+  profile: UserProfile | null;
+  roles: UserRole[];
+  loading: boolean;
+  error: string | null;
+  fetchProfile: () => Promise<void>;
+  completeOnboarding: (companyName?: string, companySize?: string) => Promise<{ error: string | null }>;
+  hasRole: (role: 'admin' | 'manager' | 'user') => boolean;
+  isAdmin: boolean;
+  isManager: boolean;
+  canInvite: boolean;
+}
+
+const UserProfileContext = createContext<UserProfileContextValue | undefined>(undefined);
+
+function getErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : "An unexpected error occurred";
+}
+
+export function UserProfileProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
+  const userId = user?.id ?? null;
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [roles, setRoles] = useState<UserRole[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const latestFetchIdRef = useRef(0);
 
-  const fetchProfile = async () => {
-    if (!user) {
+  const fetchProfile = useCallback(async () => {
+    const fetchId = ++latestFetchIdRef.current;
+
+    if (!userId) {
       setProfile(null);
       setRoles([]);
+      setError(null);
       setLoading(false);
       return;
     }
@@ -47,11 +71,15 @@ export function useUserProfile() {
       const { data: profileData, error: profileError } = await supabase
         .from("profiles")
         .select("*")
-        .eq("user_id", user.id)
+        .eq("user_id", userId)
         .single();
 
       if (profileError && profileError.code !== 'PGRST116') {
         throw profileError;
+      }
+
+      if (fetchId !== latestFetchIdRef.current) {
+        return;
       }
 
       setProfile(profileData as UserProfile | null);
@@ -60,36 +88,46 @@ export function useUserProfile() {
       const { data: rolesData, error: rolesError } = await supabase
         .from("user_roles")
         .select("role")
-        .eq("user_id", user.id);
+        .eq("user_id", userId);
+
+      if (fetchId !== latestFetchIdRef.current) {
+        return;
+      }
 
       if (rolesError) {
         console.error("Error fetching roles:", rolesError);
       } else {
         setRoles((rolesData || []) as UserRole[]);
       }
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      if (fetchId === latestFetchIdRef.current) {
+        setError(getErrorMessage(err));
+      }
     } finally {
-      setLoading(false);
+      if (fetchId === latestFetchIdRef.current) {
+        setLoading(false);
+      }
     }
-  };
+  }, [userId]);
 
   useEffect(() => {
-    fetchProfile();
-  }, [user?.id]);
+    void fetchProfile();
+  }, [fetchProfile]);
 
   const completeOnboarding = async (companyName?: string, companySize?: string) => {
-    if (!user) return { error: "No user authenticated" };
+    if (!userId) return { error: "No user authenticated" };
 
     try {
-      const updates: any = { onboarding_completed: true };
+      const updates: Pick<UserProfile, "onboarding_completed"> & Partial<Pick<UserProfile, "company_name" | "company_size">> = {
+        onboarding_completed: true,
+      };
       if (companyName) updates.company_name = companyName;
       if (companySize) updates.company_size = companySize;
 
       const { error } = await supabase
         .from("profiles")
         .update(updates)
-        .eq("user_id", user.id);
+        .eq("user_id", userId);
 
       if (error) {
         console.error("Error updating onboarding status:", error);
@@ -104,15 +142,15 @@ export function useUserProfile() {
           company_name: companyName || profile.company_name,
           company_size: companySize || profile.company_size
         });
-      } else {
-        // If profile wasn't loaded, try to fetch it now to ensure state is consistent
-        await fetchProfile();
       }
 
+      // Always refresh from the source of truth to keep routes in sync.
+      await fetchProfile();
+
       return { error: null };
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("Unexpected error in completeOnboarding:", err);
-      return { error: err.message || "An unexpected error occurred" };
+      return { error: getErrorMessage(err) };
     }
   };
 
@@ -124,7 +162,7 @@ export function useUserProfile() {
   const isManager = hasRole('manager');
   const canInvite = isAdmin || isManager;
 
-  return {
+  const value = {
     profile,
     roles,
     loading,
@@ -136,4 +174,16 @@ export function useUserProfile() {
     isManager,
     canInvite,
   };
+
+  return createElement(UserProfileContext.Provider, { value }, children);
+}
+
+export function useUserProfile() {
+  const context = useContext(UserProfileContext);
+
+  if (context === undefined) {
+    throw new Error("useUserProfile must be used within a UserProfileProvider");
+  }
+
+  return context;
 }

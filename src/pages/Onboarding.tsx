@@ -11,6 +11,10 @@ import { useGoogleAuth, GoogleUser } from "@/hooks/useGoogleAuth";
 import { useUserProfile } from "@/hooks/useUserProfile";
 import { useInvitations } from "@/hooks/useInvitations";
 import { supabase } from "@/integrations/supabase/client";
+import {
+  clearPendingOnboardingRedirect,
+  markPendingOnboardingRedirect,
+} from "@/lib/onboarding-state";
 import { toast } from "sonner";
 
 const steps = [
@@ -39,6 +43,7 @@ export default function Onboarding() {
   const [isInviting, setIsInviting] = useState(false);
   const [copiedToken, setCopiedToken] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [isCompletingOnboarding, setIsCompletingOnboarding] = useState(false);
 
   const {
     isConnecting,
@@ -54,7 +59,8 @@ export default function Onboarding() {
   // Redirect if onboarding is already completed
   useEffect(() => {
     if (profile?.onboarding_completed && !isCheckingAuth) {
-      navigate("/dashboard");
+      clearPendingOnboardingRedirect(profile.user_id);
+      navigate("/dashboard", { replace: true });
     }
 
     // Pre-fill company info if already in profile
@@ -135,6 +141,35 @@ export default function Onboarding() {
 
   const progress = (currentStep / steps.length) * 100;
 
+  const finishOnboarding = async (showSuccessToast: boolean) => {
+    if (isCompletingOnboarding) {
+      return;
+    }
+
+    setIsCompletingOnboarding(true);
+
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    const { error } = await completeOnboarding(companyName, companySize);
+    if (error) {
+      toast.error("Erreur lors de la finalisation : " + error);
+      setIsCompletingOnboarding(false);
+      return;
+    }
+
+    if (user?.id) {
+      markPendingOnboardingRedirect(user.id);
+    }
+
+    if (showSuccessToast) {
+      toast.success("Onboarding terminé !");
+    }
+
+    navigate("/dashboard", { replace: true });
+  };
+
   const handleNext = async () => {
     if (currentStep < steps.length) {
       // Save data periodically
@@ -157,14 +192,7 @@ export default function Onboarding() {
         updateStep(currentStep + 1);
       }
     } else {
-      // Complete onboarding
-      const { error } = await completeOnboarding(companyName, companySize);
-      if (error) {
-        toast.error("Erreur lors de la finalisation : " + error);
-      } else {
-        toast.success("Onboarding terminé !");
-        navigate("/dashboard");
-      }
+      await finishOnboarding(true);
     }
   };
 
@@ -176,12 +204,7 @@ export default function Onboarding() {
         updateStep(currentStep + 1);
       }
     } else {
-      const { error } = await completeOnboarding(companyName, companySize);
-      if (error) {
-        toast.error("Erreur lors de la finalisation : " + error);
-      } else {
-        navigate("/dashboard");
-      }
+      await finishOnboarding(false);
     }
   };
 
@@ -710,16 +733,16 @@ export default function Onboarding() {
 
             {/* Actions */}
             <div className="mt-10 flex items-center justify-between">
-              <Button variant="ghost" onClick={handleSkip}>
+              <Button variant="ghost" onClick={handleSkip} disabled={isCompletingOnboarding}>
                 {currentStep === steps.length ? "Passer" : "Passer cette étape"}
               </Button>
-              <Button onClick={handleNext} disabled={isSaving}>
-                {isSaving ? (
+              <Button onClick={handleNext} disabled={isSaving || isCompletingOnboarding}>
+                {isSaving || isCompletingOnboarding ? (
                   <Loader2 className="h-4 w-4 animate-spin mr-2" />
                 ) : (
                   currentStep === steps.length ? "Terminer" : "Continuer"
                 )}
-                {!isSaving && <ArrowRight className="h-4 w-4 ml-2" />}
+                {!isSaving && !isCompletingOnboarding && <ArrowRight className="h-4 w-4 ml-2" />}
               </Button>
             </div>
           </div>

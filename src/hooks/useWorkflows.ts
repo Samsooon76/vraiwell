@@ -131,9 +131,7 @@ function getIntegrationCredentials(
             return { provider_token: profileTokens?.hubspot_token ?? null };
         case 'onoff':
             return {
-                api_key: getBrowserStorageValue('localStorage', 'onoff_api_key')
-                    ?? profileTokens?.onoff_api_key
-                    ?? null,
+                api_key: profileTokens?.onoff_api_key ?? null,
             };
         default:
             return {};

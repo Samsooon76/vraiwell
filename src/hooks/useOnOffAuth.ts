@@ -58,13 +58,16 @@ async function getCurrentUserId() {
   return user?.id ?? null;
 }
 
-async function getStoredApiKey() {
-  if (typeof window !== "undefined") {
-    const localKey = window.localStorage.getItem(ONOFF_API_KEY_STORAGE_KEY);
-    if (localKey) {
-      return localKey;
-    }
+function clearLegacyStoredApiKey() {
+  if (typeof window === "undefined") {
+    return;
   }
+
+  window.localStorage.removeItem(ONOFF_API_KEY_STORAGE_KEY);
+}
+
+async function getStoredApiKey() {
+  clearLegacyStoredApiKey();
 
   const userId = await getCurrentUserId();
   if (!userId) return null;
@@ -235,18 +238,6 @@ async function getFunctionErrorMessage(error: unknown, fallback: string) {
   return getErrorMessage(error, fallback);
 }
 
-function persistApiKeyLocally(apiKey: string | null) {
-  if (typeof window === "undefined") {
-    return;
-  }
-
-  if (apiKey) {
-    window.localStorage.setItem(ONOFF_API_KEY_STORAGE_KEY, apiKey);
-  } else {
-    window.localStorage.removeItem(ONOFF_API_KEY_STORAGE_KEY);
-  }
-}
-
 export function useOnOffAuth() {
   const [isConnecting, setIsConnecting] = useState(false);
   const [isLoadingMembers, setIsLoadingMembers] = useState(false);
@@ -269,6 +260,7 @@ export function useOnOffAuth() {
   }, []);
 
   useEffect(() => {
+    clearLegacyStoredApiKey();
     void refreshOnOffConnection();
 
     const unsubscribeConnectionChanges = subscribeIntegrationConnectionChanges("onoff", () => {
@@ -277,6 +269,36 @@ export function useOnOffAuth() {
 
     return () => {
       unsubscribeConnectionChanges();
+    };
+  }, [refreshOnOffConnection]);
+
+  useEffect(() => {
+    let currentUserId: string | null = null;
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      const nextUserId = session?.user?.id ?? null;
+      if (nextUserId === currentUserId) {
+        return;
+      }
+
+      currentUserId = nextUserId;
+      setMembers([]);
+      setNumbersByMember({});
+      setWorkspaceInfo(null);
+      setError(null);
+      void refreshOnOffConnection();
+    });
+
+    supabase.auth.getUser()
+      .then(({ data: { user } }) => {
+        currentUserId = user?.id ?? null;
+      })
+      .catch(() => {
+        currentUserId = null;
+      });
+
+    return () => {
+      subscription.unsubscribe();
     };
   }, [refreshOnOffConnection]);
 
@@ -342,17 +364,17 @@ export function useOnOffAuth() {
       }
 
       const userId = await getCurrentUserId();
-      persistApiKeyLocally(apiKey.trim());
+      if (!userId) {
+        throw new Error("Utilisateur non authentifié");
+      }
 
-      if (userId) {
-        const { error: updateError } = await supabase
-          .from("profiles")
-          .update({ onoff_api_key: apiKey.trim() })
-          .eq("user_id", userId);
+      const { error: updateError } = await supabase
+        .from("profiles")
+        .update({ onoff_api_key: apiKey.trim() })
+        .eq("user_id", userId);
 
-        if (updateError) {
-          console.warn("Unable to persist OnOff API key in profile, using local storage fallback", updateError);
-        }
+      if (updateError) {
+        throw updateError;
       }
 
       setHasToken(true);
@@ -655,7 +677,7 @@ export function useOnOffAuth() {
 
     try {
       const userId = await getCurrentUserId();
-      persistApiKeyLocally(null);
+      clearLegacyStoredApiKey();
 
       if (userId) {
         const { error: updateError } = await supabase
