@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "./useAuth";
 
@@ -19,13 +19,17 @@ export interface InvitePayload {
   role: 'admin' | 'manager' | 'user';
 }
 
+function getErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : "An unexpected error occurred";
+}
+
 export function useInvitations() {
   const { user } = useAuth();
   const [invitations, setInvitations] = useState<Invitation[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchInvitations = async () => {
+  const fetchInvitations = useCallback(async () => {
     if (!user) return;
 
     setLoading(true);
@@ -39,14 +43,14 @@ export function useInvitations() {
 
       if (fetchError) throw fetchError;
       setInvitations((data || []) as Invitation[]);
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError(getErrorMessage(err));
     } finally {
       setLoading(false);
     }
-  };
+  }, [user]);
 
-  const createInvitation = async (payload: InvitePayload): Promise<{ invitation?: Invitation; error?: string }> => {
+  const createInvitation = useCallback(async (payload: InvitePayload): Promise<{ invitation?: Invitation; error?: string }> => {
     if (!user) return { error: "Not authenticated" };
 
     try {
@@ -66,12 +70,12 @@ export function useInvitations() {
       setInvitations(prev => [invitation, ...prev]);
       
       return { invitation };
-    } catch (err: any) {
-      return { error: err.message };
+    } catch (err: unknown) {
+      return { error: getErrorMessage(err) };
     }
-  };
+  }, [user]);
 
-  const createBulkInvitations = async (payloads: InvitePayload[]): Promise<{ success: number; errors: string[] }> => {
+  const createBulkInvitations = useCallback(async (payloads: InvitePayload[]): Promise<{ success: number; errors: string[] }> => {
     const results = { success: 0, errors: [] as string[] };
 
     for (const payload of payloads) {
@@ -84,9 +88,9 @@ export function useInvitations() {
     }
 
     return results;
-  };
+  }, [createInvitation]);
 
-  const cancelInvitation = async (id: string): Promise<{ error?: string }> => {
+  const cancelInvitation = useCallback(async (id: string): Promise<{ error?: string }> => {
     try {
       const { error: updateError } = await supabase
         .from("invitations")
@@ -100,16 +104,16 @@ export function useInvitations() {
       );
       
       return {};
-    } catch (err: any) {
-      return { error: err.message };
+    } catch (err: unknown) {
+      return { error: getErrorMessage(err) };
     }
-  };
+  }, []);
 
-  const getInvitationLink = (token: string): string => {
+  const getInvitationLink = useCallback((token: string): string => {
     return `${window.location.origin}/signup?invite=${token}`;
-  };
+  }, []);
 
-  const checkInvitationByToken = async (token: string): Promise<Partial<Invitation> | null> => {
+  const checkInvitationByToken = useCallback(async (token: string): Promise<Partial<Invitation> | null> => {
     try {
       // Use secure RPC function to lookup invitation by token (doesn't expose all invitations)
       const { data, error } = await supabase.rpc('get_invitation_by_token', {
@@ -129,24 +133,28 @@ export function useInvitations() {
     } catch {
       return null;
     }
-  };
+  }, []);
 
-  const acceptInvitation = async (token: string): Promise<{ success: boolean; error?: string }> => {
-    if (!user) return { success: false, error: "Not authenticated" };
+  const acceptInvitation = useCallback(async (token: string, userId?: string): Promise<{ success: boolean; error?: string }> => {
+    const targetUserId = userId || user?.id;
+
+    if (!targetUserId) {
+      return { success: false, error: "Not authenticated" };
+    }
 
     try {
       const { data, error } = await supabase.rpc('accept_invitation', {
         _token: token,
-        _user_id: user.id
+        _user_id: targetUserId
       });
 
       if (error) throw error;
       
       return { success: data as boolean };
-    } catch (err: any) {
-      return { success: false, error: err.message };
+    } catch (err: unknown) {
+      return { success: false, error: getErrorMessage(err) };
     }
-  };
+  }, [user]);
 
   return {
     invitations,

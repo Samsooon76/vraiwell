@@ -1,7 +1,8 @@
-import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { motion } from "framer-motion";
 import { useAuth } from "@/hooks/useAuth";
+import { useInvitations } from "@/hooks/useInvitations";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -10,6 +11,7 @@ import { Eye, EyeOff, Loader2, Check, Mail } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 
 export default function Signup() {
+  const [searchParams] = useSearchParams();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [fullName, setFullName] = useState("");
@@ -17,9 +19,124 @@ export default function Signup() {
   const [isLoading, setIsLoading] = useState(false);
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
   const [isSignedUp, setIsSignedUp] = useState(false);
-  const { signUp } = useAuth();
+  const [isCheckingInvitation, setIsCheckingInvitation] = useState(false);
+  const [isApplyingInvitation, setIsApplyingInvitation] = useState(false);
+  const [hasAppliedInvitation, setHasAppliedInvitation] = useState(false);
+  const [invitedEmail, setInvitedEmail] = useState<string | null>(null);
+  const [invitedRole, setInvitedRole] = useState<string | null>(null);
+  const { user, signUp } = useAuth();
+  const { checkInvitationByToken, acceptInvitation } = useInvitations();
   const navigate = useNavigate();
   const { toast } = useToast();
+  const inviteToken = searchParams.get("invite");
+
+  const inviteRedirectTo = useMemo(() => {
+    if (!inviteToken) {
+      return undefined;
+    }
+
+    return `${window.location.origin}/signup?invite=${inviteToken}`;
+  }, [inviteToken]);
+
+  useEffect(() => {
+    if (!inviteToken) {
+      setIsCheckingInvitation(false);
+      return;
+    }
+
+    let isMounted = true;
+
+    const loadInvitation = async () => {
+      setIsCheckingInvitation(true);
+      const invitation = await checkInvitationByToken(inviteToken);
+
+      if (!isMounted) {
+        return;
+      }
+
+      if (!invitation?.email) {
+        toast({
+          title: "Invitation invalide",
+          description: "Ce lien d'invitation n'est plus valide ou a expiré.",
+          variant: "destructive",
+        });
+        setIsCheckingInvitation(false);
+        return;
+      }
+
+      setEmail(invitation.email);
+      setInvitedEmail(invitation.email);
+      setInvitedRole(invitation.role || null);
+      setIsCheckingInvitation(false);
+    };
+
+    void loadInvitation();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [checkInvitationByToken, inviteToken, toast]);
+
+  const activateInvitation = useCallback(async (token: string, userId: string) => {
+    setIsApplyingInvitation(true);
+
+    const { success, error } = await acceptInvitation(token, userId);
+
+    if (!success) {
+      toast({
+        title: "Erreur d'invitation",
+        description: error || "Impossible d'accepter cette invitation.",
+        variant: "destructive",
+      });
+      setIsApplyingInvitation(false);
+      return false;
+    }
+
+    const { error: profileError } = await supabase
+      .from("profiles")
+      .update({ onboarding_completed: true })
+      .eq("user_id", userId);
+
+    if (profileError) {
+      toast({
+        title: "Invitation acceptée",
+        description: "Votre accès a été activé, mais la mise à jour du profil a échoué.",
+        variant: "destructive",
+      });
+    } else {
+      toast({
+        title: "Invitation acceptée",
+        description: "Votre accès Well est activé.",
+      });
+    }
+
+    setHasAppliedInvitation(true);
+    setIsApplyingInvitation(false);
+    return true;
+  }, [acceptInvitation, toast]);
+
+  useEffect(() => {
+    if (!user || !inviteToken || hasAppliedInvitation) {
+      return;
+    }
+
+    let isMounted = true;
+
+    const applyInvitation = async () => {
+      const accepted = await activateInvitation(inviteToken, user.id);
+
+      if (!isMounted || !accepted) {
+        return;
+      }
+      navigate("/dashboard", { replace: true });
+    };
+
+    void applyInvitation();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [activateInvitation, hasAppliedInvitation, inviteToken, navigate, user]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -35,7 +152,7 @@ export default function Signup() {
       return;
     }
 
-    const { data, error } = await signUp(email, password, fullName);
+    const { data, error } = await signUp(email, password, fullName, inviteRedirectTo);
     console.log("Signup response:", data, error);
 
     if (error) {
@@ -45,20 +162,32 @@ export default function Signup() {
         description: isRateLimit
           ? "Vous avez atteint la limite d'inscriptions autorisée par Supabase. Veuillez réessayer plus tard ou utiliser la connexion Google ci-dessus."
           : error.message,
-        variant: "destructive",
-      });
+          variant: "destructive",
+        });
     } else if (data?.user && !data.session) {
       setIsSignedUp(true);
       toast({
         title: "Vérifiez vos emails",
-        description: "Un lien de confirmation vous a été envoyé pour activer votre compte.",
+        description: inviteToken
+          ? "Un lien de confirmation vous a été envoyé. Après validation, votre invitation sera appliquée automatiquement."
+          : "Un lien de confirmation vous a été envoyé pour activer votre compte.",
       });
     } else {
       toast({
         title: "Compte créé !",
-        description: "Bienvenue sur Well, configurons votre espace.",
+        description: inviteToken
+          ? "Bienvenue sur Well, votre invitation est en cours d'activation."
+          : "Bienvenue sur Well, configurons votre espace.",
       });
-      navigate("/onboarding");
+
+      if (inviteToken && data?.user) {
+        const accepted = await activateInvitation(inviteToken, data.user.id);
+        if (accepted) {
+          navigate("/dashboard");
+        }
+      } else {
+        navigate("/onboarding");
+      }
     }
 
     setIsLoading(false);
@@ -70,15 +199,17 @@ export default function Signup() {
       const { error } = await supabase.auth.signInWithOAuth({
         provider: "google",
         options: {
-          redirectTo: `${window.location.origin}/onboarding?from=google`,
+          redirectTo: inviteToken
+            ? `${window.location.origin}/signup?invite=${inviteToken}`
+            : `${window.location.origin}/onboarding?from=google`,
           scopes: "email profile https://www.googleapis.com/auth/admin.directory.user.readonly",
         },
       });
       if (error) throw error;
-    } catch (err: any) {
+    } catch (err) {
       toast({
         title: "Erreur",
-        description: err.message,
+        description: err instanceof Error ? err.message : "Une erreur est survenue.",
         variant: "destructive",
       });
       setIsGoogleLoading(false);
@@ -113,6 +244,24 @@ export default function Signup() {
 
           {/* Card */}
           <div className="bg-card rounded-2xl border border-border p-8 shadow-card">
+            {(isCheckingInvitation || isApplyingInvitation) && (
+              <div className="mb-4 flex items-center gap-2 rounded-lg border border-border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                {isCheckingInvitation ? "Vérification de l'invitation..." : "Activation de l'invitation..."}
+              </div>
+            )}
+
+            {invitedEmail && !isCheckingInvitation && (
+              <div className="mb-4 rounded-lg border border-primary/20 bg-primary/5 px-4 py-3 text-sm">
+                <p className="font-medium text-foreground">Invitation Well détectée</p>
+                <p className="mt-1 text-muted-foreground">
+                  {invitedRole
+                    ? `Ce compte sera créé avec le rôle ${invitedRole}.`
+                    : "Ce compte sera rattaché à une invitation existante."}
+                </p>
+              </div>
+            )}
+
             {isSignedUp ? (
               <div className="text-center py-4">
                 <div className="flex h-16 w-16 items-center justify-center rounded-full bg-success/10 mx-auto mb-6">
@@ -204,6 +353,7 @@ export default function Signup() {
                       onChange={(e) => setEmail(e.target.value)}
                       required
                       autoComplete="email"
+                      disabled={Boolean(invitedEmail)}
                     />
                   </div>
 

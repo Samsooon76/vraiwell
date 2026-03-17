@@ -1,9 +1,12 @@
 import { motion } from "framer-motion";
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   Users,
   Plus,
@@ -12,7 +15,10 @@ import {
   Mail,
   UserPlus,
   Loader2,
-  Crown
+  Crown,
+  Copy,
+  Link2,
+  X
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -23,20 +29,46 @@ import {
 import { AddTeamModal } from "@/components/modals/AddTeamModal";
 import { TeamDetailsModal } from "@/components/modals/TeamDetailsModal";
 import { useTeams, Team } from "@/hooks/useTeams";
+import { useInvitations } from "@/hooks/useInvitations";
+import { useUserProfile } from "@/hooks/useUserProfile";
+import { toast } from "sonner";
 
 export default function Teams() {
   const [searchQuery, setSearchQuery] = useState("");
   const [addTeamOpen, setAddTeamOpen] = useState(false);
   const [selectedTeam, setSelectedTeam] = useState<Team | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const [inviteEmails, setInviteEmails] = useState("");
+  const [emailRole, setEmailRole] = useState<'admin' | 'manager' | 'user'>("user");
+  const [isInviting, setIsInviting] = useState(false);
+  const [copiedInvitationId, setCopiedInvitationId] = useState<string | null>(null);
+  const [cancellingInvitationId, setCancellingInvitationId] = useState<string | null>(null);
 
   const { teams, isLoading, fetchTeams, createTeam } = useTeams();
+  const { canInvite } = useUserProfile();
+  const {
+    invitations,
+    loading: invitationsLoading,
+    error: invitationsError,
+    fetchInvitations,
+    createBulkInvitations,
+    cancelInvitation,
+    getInvitationLink,
+  } = useInvitations();
 
   const filteredTeams = teams.filter((team) =>
     team.name.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
   const totalMembers = teams.reduce((sum, team) => sum + (team.memberCount || 0), 0);
+  const pendingInvitations = useMemo(
+    () => invitations.filter((invitation) => invitation.status === "pending"),
+    [invitations]
+  );
+
+  useEffect(() => {
+    void fetchInvitations();
+  }, [fetchInvitations]);
 
   const handleTeamClick = (team: Team) => {
     setSelectedTeam(team);
@@ -46,6 +78,59 @@ export default function Teams() {
   const handleTeamDeleted = () => {
     setSelectedTeam(null);
     fetchTeams();
+  };
+
+  const handleInviteFromEmails = async () => {
+    const emails = inviteEmails
+      .split(/[,\n]/)
+      .map((value) => value.trim().toLowerCase())
+      .filter((value) => value.length > 0 && value.includes("@"));
+
+    if (emails.length === 0) {
+      toast.error("Veuillez entrer au moins une adresse email valide.");
+      return;
+    }
+
+    setIsInviting(true);
+
+    const result = await createBulkInvitations(
+      emails.map((email) => ({
+        email,
+        role: emailRole,
+      }))
+    );
+
+    if (result.success > 0) {
+      toast.success(`${result.success} invitation(s) créée(s)`);
+      setInviteEmails("");
+    }
+
+    if (result.errors.length > 0) {
+      result.errors.forEach((error) => toast.error(error));
+    }
+
+    setIsInviting(false);
+  };
+
+  const handleCopyInvitationLink = async (invitationId: string, token: string) => {
+    await navigator.clipboard.writeText(getInvitationLink(token));
+    setCopiedInvitationId(invitationId);
+    toast.success("Lien d'invitation copié.");
+    window.setTimeout(() => setCopiedInvitationId(null), 2000);
+  };
+
+  const handleCancelInvitation = async (invitationId: string) => {
+    setCancellingInvitationId(invitationId);
+
+    const { error } = await cancelInvitation(invitationId);
+
+    if (error) {
+      toast.error(error);
+    } else {
+      toast.success("Invitation annulée.");
+    }
+
+    setCancellingInvitationId(null);
   };
 
   return (
@@ -104,7 +189,7 @@ export default function Teams() {
                 <Mail className="h-5 w-5" />
               </div>
               <div>
-                <p className="text-2xl font-bold text-foreground">0</p>
+                <p className="text-2xl font-bold text-foreground">{pendingInvitations.length}</p>
                 <p className="text-sm text-muted-foreground">Invitations en attente</p>
               </div>
             </div>
@@ -126,6 +211,128 @@ export default function Teams() {
               onChange={(e) => setSearchQuery(e.target.value)}
               className="pl-10"
             />
+          </div>
+        </motion.div>
+
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.25 }}
+          className="mb-8 rounded-xl border border-border bg-card p-6 shadow-card"
+        >
+          <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
+            <div className="flex-1 space-y-4">
+              <div>
+                <h2 className="font-display text-lg text-foreground">Inviter des collaborateurs</h2>
+                {invitationsError && (
+                  <p className="mt-2 text-xs text-destructive">
+                    Impossible de charger les invitations existantes : {invitationsError}
+                  </p>
+                )}
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="invite-emails">Adresses email</Label>
+                <Textarea
+                  id="invite-emails"
+                  placeholder="alice@entreprise.com, bob@entreprise.com"
+                  value={inviteEmails}
+                  onChange={(event) => setInviteEmails(event.target.value)}
+                  className="min-h-[120px]"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Séparez les adresses par des virgules ou des retours à la ligne.
+                </p>
+              </div>
+
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-end">
+                <div className="w-full sm:max-w-[220px]">
+                  <Label htmlFor="invite-role">Rôle par défaut</Label>
+                  <Select value={emailRole} onValueChange={(value) => setEmailRole(value as typeof emailRole)}>
+                    <SelectTrigger id="invite-role" className="mt-2">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="user">Utilisateur</SelectItem>
+                      <SelectItem value="manager">Manager</SelectItem>
+                      <SelectItem value="admin">Admin</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <Button
+                  onClick={handleInviteFromEmails}
+                  disabled={isInviting || !inviteEmails.trim()}
+                  className="sm:min-w-[180px]"
+                >
+                  {isInviting ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserPlus className="h-4 w-4" />}
+                  Créer les invitations
+                </Button>
+              </div>
+            </div>
+
+            <div className="w-full lg:max-w-md">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-medium text-foreground">Invitations en attente</h3>
+                {invitationsLoading && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
+              </div>
+
+              <div className="mt-4 space-y-3">
+                {pendingInvitations.length === 0 ? (
+                  <div className="rounded-lg border border-dashed border-border px-4 py-6 text-center text-sm text-muted-foreground">
+                    Aucune invitation en attente.
+                  </div>
+                ) : (
+                  pendingInvitations.map((invitation) => (
+                    <div
+                      key={invitation.id}
+                      className="rounded-lg border border-border bg-background px-4 py-3"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-medium text-foreground">{invitation.email}</p>
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            Expire le {new Date(invitation.expires_at).toLocaleDateString("fr-FR")}
+                          </p>
+                        </div>
+                        <Badge variant="outline" className="shrink-0 capitalize">
+                          {invitation.role}
+                        </Badge>
+                      </div>
+
+                      <div className="mt-3 flex gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="flex-1"
+                          onClick={() => handleCopyInvitationLink(invitation.id, invitation.token)}
+                        >
+                          {copiedInvitationId === invitation.id ? (
+                            <Copy className="h-4 w-4" />
+                          ) : (
+                            <Link2 className="h-4 w-4" />
+                          )}
+                          Copier le lien
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleCancelInvitation(invitation.id)}
+                          disabled={cancellingInvitationId === invitation.id}
+                        >
+                          {cancellingInvitationId === invitation.id ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <X className="h-4 w-4" />
+                          )}
+                          Annuler
+                        </Button>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
           </div>
         </motion.div>
 
