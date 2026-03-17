@@ -72,6 +72,7 @@ export type Database = {
           source_url: string | null
           start_date: string | null
           status: string
+          team_id: string | null
           terms_checked_at: string | null
           terms_status: string
           terms_summary: string | null
@@ -102,6 +103,7 @@ export type Database = {
           source_url?: string | null
           start_date?: string | null
           status?: string
+          team_id?: string | null
           terms_checked_at?: string | null
           terms_status?: string
           terms_summary?: string | null
@@ -132,6 +134,7 @@ export type Database = {
           source_url?: string | null
           start_date?: string | null
           status?: string
+          team_id?: string | null
           terms_checked_at?: string | null
           terms_status?: string
           terms_summary?: string | null
@@ -141,7 +144,15 @@ export type Database = {
           user_id?: string
           vendor_name?: string | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "contracts_team_id_fkey"
+            columns: ["team_id"]
+            isOneToOne: false
+            referencedRelation: "teams"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       invitations: {
         Row: {
@@ -194,6 +205,7 @@ export type Database = {
           notion_token: string | null
           hubspot_token: string | null
           microsoft_token: string | null
+          onoff_api_key: string | null
         }
         Insert: {
           avatar_url?: string | null
@@ -209,6 +221,7 @@ export type Database = {
           notion_token?: string | null
           hubspot_token?: string | null
           microsoft_token?: string | null
+          onoff_api_key?: string | null
         }
         Update: {
           avatar_url?: string | null
@@ -224,6 +237,7 @@ export type Database = {
           notion_token?: string | null
           hubspot_token?: string | null
           microsoft_token?: string | null
+          onoff_api_key?: string | null
         }
         Relationships: []
       }

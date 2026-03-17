@@ -6,9 +6,8 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Progress } from "@/components/ui/progress";
 import { ToolLogo } from "@/components/tools/ToolLogo";
-import { ExternalLink, Users, CreditCard, Calendar, Settings } from "lucide-react";
+import { ExternalLink, Calendar, Settings } from "lucide-react";
 import { Tool } from "@/components/tools/ToolCard";
 
 interface ToolDetailsModalProps {
@@ -21,9 +20,20 @@ interface ToolDetailsModalProps {
 export function ToolDetailsModal({ tool, open, onOpenChange, onRequestAccess }: ToolDetailsModalProps) {
   if (!tool) return null;
 
-  const usagePercent = tool.seats && tool.usedSeats 
-    ? Math.round((tool.usedSeats / tool.seats) * 100) 
-    : 0;
+  const detailStats = tool.stats?.length
+    ? tool.stats.slice(0, 2)
+    : [
+        {
+          label: tool.seats !== undefined && tool.usedSeats !== undefined ? "Licences" : "Statut",
+          value: tool.seats !== undefined && tool.usedSeats !== undefined
+            ? `${tool.usedSeats}/${tool.seats}`
+            : "Connecté",
+        },
+        {
+          label: "Coût mensuel",
+          value: `€${tool.monthlySpend?.toLocaleString() ?? 0}`,
+        },
+      ];
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -44,28 +54,14 @@ export function ToolDetailsModal({ tool, open, onOpenChange, onRequestAccess }: 
           {tool.status === "active" && (
             <>
               <div className="grid grid-cols-2 gap-4">
-                <div className="rounded-lg border border-border p-4">
-                  <div className="flex items-center gap-2 text-muted-foreground mb-2">
-                    <Users className="h-4 w-4" />
-                    <span className="text-sm">Licences</span>
+                {detailStats.map((stat) => (
+                  <div key={`${tool.id}-${stat.label}`} className="rounded-lg border border-border p-4">
+                    <p className="text-sm text-muted-foreground">{stat.label}</p>
+                    <p className="mt-2 text-2xl font-semibold text-foreground">
+                      {stat.value}
+                    </p>
                   </div>
-                  <p className="text-2xl font-semibold text-foreground">
-                    {tool.usedSeats}/{tool.seats}
-                  </p>
-                  <Progress value={usagePercent} className="mt-2" />
-                  <p className="text-xs text-muted-foreground mt-1">{usagePercent}% utilisé</p>
-                </div>
-                
-                <div className="rounded-lg border border-border p-4">
-                  <div className="flex items-center gap-2 text-muted-foreground mb-2">
-                    <CreditCard className="h-4 w-4" />
-                    <span className="text-sm">Coût mensuel</span>
-                  </div>
-                  <p className="text-2xl font-semibold text-foreground">
-                    €{tool.monthlySpend?.toLocaleString()}
-                  </p>
-                  <p className="text-xs text-muted-foreground mt-1">par mois</p>
-                </div>
+                ))}
               </div>
               
               <div className="flex gap-2">

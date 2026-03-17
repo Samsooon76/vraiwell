@@ -35,6 +35,8 @@ export interface ContractOcrExtractedSignals {
   renewalNoticeDays: number | null;
   renewalPeriodMonths: number | null;
   candidateDates: string[];
+  contactEmails: string[];
+  candidateDomains: string[];
   matchedSnippets: string[];
 }
 
@@ -54,6 +56,7 @@ export interface PreparedContractFileResult {
 export interface Contract {
   id: string;
   user_id: string;
+  team_id: string | null;
   contract_label: string;
   tool_name: string;
   vendor_name: string | null;
@@ -86,6 +89,7 @@ export interface ContractUpsertInput {
   contract_label: string;
   tool_name: string;
   vendor_name?: string | null;
+  team_id?: string | null;
   status: ContractStatus;
   source_url?: string | null;
   start_date?: string | null;

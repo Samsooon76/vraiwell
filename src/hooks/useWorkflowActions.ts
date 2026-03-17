@@ -1,11 +1,12 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { WorkflowAction } from '@/types/workflow';
-import { ACTION_REGISTRY, getActionCountByIntegration, IntegrationId } from '@/config/workflowActions';
+import { getActionCountByIntegration, IntegrationId, listActiveWorkflowActions } from '@/config/workflowActions';
 import { useGoogleAuth } from './useGoogleAuth';
 import { useMicrosoftAuth } from './useMicrosoftAuth';
 import { useSlackAuth } from './useSlackAuth';
 import { useNotionAuth } from './useNotionAuth';
 import { useHubSpotAuth } from './useHubSpotAuth';
+import { useOnOffAuth } from './useOnOffAuth';
 
 interface ConnectedIntegrations {
     google: boolean;
@@ -13,6 +14,7 @@ interface ConnectedIntegrations {
     slack: boolean;
     notion: boolean;
     hubspot: boolean;
+    onoff: boolean;
 }
 
 interface UseWorkflowActionsReturn {
@@ -35,6 +37,7 @@ export function useWorkflowActions(): UseWorkflowActionsReturn {
         slack: false,
         notion: false,
         hubspot: false,
+        onoff: false,
     });
 
     // Use refs to store check functions to avoid dependency loops
@@ -43,25 +46,23 @@ export function useWorkflowActions(): UseWorkflowActionsReturn {
     const { hasToken: hasSlackToken } = useSlackAuth();
     const { hasToken: hasNotionToken } = useNotionAuth();
     const { hasToken: hasHubSpotToken } = useHubSpotAuth();
+    const { hasToken: hasOnOffToken, checkOnOffConnection } = useOnOffAuth();
 
     const checkGoogleRef = useRef(checkGoogleConnection);
     const checkMicrosoftRef = useRef(checkMicrosoftConnection);
+    const checkOnOffRef = useRef(checkOnOffConnection);
 
     // Keep refs updated
     useEffect(() => {
         checkGoogleRef.current = checkGoogleConnection;
         checkMicrosoftRef.current = checkMicrosoftConnection;
-    }, [checkGoogleConnection, checkMicrosoftConnection]);
+        checkOnOffRef.current = checkOnOffConnection;
+    }, [checkGoogleConnection, checkMicrosoftConnection, checkOnOffConnection]);
 
     // Actions come from the local registry - no DB fetch needed!
     // This is scalable: just add new actions to workflowActions.ts
     const actions = useMemo<WorkflowAction[]>(() => {
-        return ACTION_REGISTRY.filter(a => a.is_active).map((action, index) => ({
-            ...action,
-            id: `${action.integration_id}-${action.action_key}`,
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-        }));
+        return listActiveWorkflowActions();
     }, []);
 
     // Action counts from registry
@@ -77,6 +78,7 @@ export function useWorkflowActions(): UseWorkflowActionsReturn {
             try {
                 let isGoogleConnected = false;
                 let isMicrosoftConnected = false;
+                let isOnOffConnected = false;
 
                 try {
                     isGoogleConnected = await checkGoogleRef.current();
@@ -90,6 +92,14 @@ export function useWorkflowActions(): UseWorkflowActionsReturn {
                     console.error('Error checking Microsoft connection:', e);
                 }
 
+                if (hasOnOffToken) {
+                    try {
+                        isOnOffConnected = await checkOnOffRef.current();
+                    } catch (e) {
+                        console.error('Error checking OnOff connection:', e);
+                    }
+                }
+
                 if (cancelled) return;
 
                 setConnectedIntegrations({
@@ -98,6 +108,7 @@ export function useWorkflowActions(): UseWorkflowActionsReturn {
                     slack: hasSlackToken,
                     notion: hasNotionToken,
                     hubspot: hasHubSpotToken,
+                    onoff: isOnOffConnected,
                 });
             } catch (err) {
                 console.error('Error checking connections:', err);
@@ -114,7 +125,7 @@ export function useWorkflowActions(): UseWorkflowActionsReturn {
         return () => {
             cancelled = true;
         };
-    }, []); // Empty deps - only run on mount
+    }, [hasSlackToken, hasNotionToken, hasHubSpotToken, hasOnOffToken]);
 
     // Update token states when they change
     useEffect(() => {
@@ -123,8 +134,9 @@ export function useWorkflowActions(): UseWorkflowActionsReturn {
             slack: hasSlackToken,
             notion: hasNotionToken,
             hubspot: hasHubSpotToken,
+            onoff: hasOnOffToken ? prev.onoff : false,
         }));
-    }, [hasSlackToken, hasNotionToken, hasHubSpotToken]);
+    }, [hasSlackToken, hasNotionToken, hasHubSpotToken, hasOnOffToken]);
 
     const refetch = async () => {
         setIsLoading(true);
@@ -133,6 +145,7 @@ export function useWorkflowActions(): UseWorkflowActionsReturn {
         try {
             let isGoogleConnected = false;
             let isMicrosoftConnected = false;
+            let isOnOffConnected = false;
 
             try {
                 isGoogleConnected = await checkGoogleRef.current();
@@ -146,12 +159,21 @@ export function useWorkflowActions(): UseWorkflowActionsReturn {
                 console.error('Error refetching Microsoft connection:', e);
             }
 
+            if (hasOnOffToken) {
+                try {
+                    isOnOffConnected = await checkOnOffRef.current();
+                } catch (e) {
+                    console.error('Error refetching OnOff connection:', e);
+                }
+            }
+
             setConnectedIntegrations({
                 google: isGoogleConnected,
                 microsoft: isMicrosoftConnected,
                 slack: hasSlackToken,
                 notion: hasNotionToken,
                 hubspot: hasHubSpotToken,
+                onoff: isOnOffConnected,
             });
         } catch (err) {
             console.error('Error refetching:', err);

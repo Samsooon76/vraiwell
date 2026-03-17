@@ -4,6 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import {
   calculateNoticeDeadline,
   DEFAULT_OCR_MODEL,
+  deriveContractEndDate,
   getContractTimelineDate,
   normalizeOptionalText,
   normalizeOptionalUrl,
@@ -28,6 +29,7 @@ interface UseContractsReturn {
   deleteContract: (contract: Contract) => Promise<boolean>;
   runContractOcr: (contractId: string, options?: { silent?: boolean }) => Promise<boolean>;
   runContractTermsScan: (contractId: string, options?: { silent?: boolean }) => Promise<boolean>;
+  generateNonRenewalEmail: (contractId: string) => Promise<{ subject: string; body: string } | null>;
   openContractFile: (contract: Contract) => Promise<void>;
 }
 
@@ -121,6 +123,26 @@ async function invokeContractFunction(functionName: string, body: Record<string,
 
 async function invokeContractTermsScan(body: { contractId: string }) {
   return invokeContractFunction("scan-contract-terms", body);
+}
+
+async function invokeNonRenewalEmailGeneration(body: { contractId: string }) {
+  return invokeContractFunction("generate-non-renewal-email", body);
+}
+
+function isSchemaCacheMissingColumnError(error: unknown, columnName: string) {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+
+  const code = "code" in error && typeof error.code === "string" ? error.code : null;
+  const message = "message" in error && typeof error.message === "string" ? error.message : null;
+
+  return code === "PGRST204" && message?.includes(`'${columnName}'`) === true;
+}
+
+function omitTeamId<T extends { team_id?: unknown }>(payload: T): Omit<T, "team_id"> {
+  const { team_id: _teamId, ...rest } = payload;
+  return rest;
 }
 
 export function useContracts(): UseContractsReturn {
@@ -245,6 +267,19 @@ export function useContracts(): UseContractsReturn {
     contractId: string,
     options?: { silent?: boolean },
   ) => {
+    setContracts((current) =>
+      sortContracts(
+        current.map((contract) =>
+          contract.id === contractId
+            ? {
+                ...contract,
+                terms_status: "reviewing",
+              }
+            : contract
+        ),
+      )
+    );
+
     try {
       const data = await invokeContractTermsScan({ contractId });
 
@@ -252,12 +287,18 @@ export function useContracts(): UseContractsReturn {
         throw new Error(data.error);
       }
 
-      if (!options?.silent) {
+      const success = data?.success !== false;
+
+      if (!options?.silent && success) {
         toast.success("Extraction CGV / CGU lancee");
       }
 
+      if (!options?.silent && !success) {
+        toast.error("Aucune page CGV / CGU fiable n'a ete confirmee");
+      }
+
       await fetchContracts();
-      return true;
+      return success;
     } catch (err) {
       console.error("Error scanning terms:", err);
       if (!options?.silent) {
@@ -267,6 +308,30 @@ export function useContracts(): UseContractsReturn {
       return false;
     }
   }, [fetchContracts]);
+
+  const generateNonRenewalEmail = useCallback(async (contractId: string) => {
+    try {
+      const data = await invokeNonRenewalEmailGeneration({ contractId });
+
+      if (data?.error) {
+        throw new Error(data.error);
+      }
+
+      const subject = typeof data?.subject === "string" ? data.subject.trim() : "";
+      const body = typeof data?.body === "string" ? data.body.trim() : "";
+
+      if (!subject || !body) {
+        throw new Error("Le brouillon genere est incomplet");
+      }
+
+      toast.success("Brouillon d'email genere");
+      return { subject, body };
+    } catch (err) {
+      console.error("Error generating non-renewal email:", err);
+      toast.error("Impossible de generer le mail");
+      return null;
+    }
+  }, []);
 
   const createContract = useCallback(async (input: ContractUpsertInput) => {
     try {
@@ -289,16 +354,18 @@ export function useContracts(): UseContractsReturn {
         uploadedFile = await uploadContractFile(user.id, input.file);
       }
 
-      const noticeDeadline = calculateNoticeDeadline(input.end_date, input.renewal_notice_days);
+      const nextEndDate = input.end_date || deriveContractEndDate(input.start_date, input.renewal_period_months);
+      const noticeDeadline = calculateNoticeDeadline(nextEndDate, input.renewal_notice_days);
 
       const payload = {
         contract_label: input.contract_label.trim(),
         tool_name: input.tool_name.trim(),
         vendor_name: normalizeOptionalText(input.vendor_name),
+        team_id: input.team_id || null,
         status: input.status,
         source_url: normalizeOptionalUrl(input.source_url),
         start_date: input.start_date || null,
-        end_date: input.end_date || null,
+        end_date: nextEndDate || null,
         renewal_type: input.renewal_type,
         renewal_period_months: input.renewal_period_months ?? null,
         renewal_notice_days: input.renewal_notice_days ?? null,
@@ -331,21 +398,45 @@ export function useContracts(): UseContractsReturn {
         .select("*")
         .single();
 
+      let persistedContract = createdContract as Contract | null;
+      let savedWithoutTeamAssignment = false;
+
       if (insertError) {
-        if (uploadedFile?.path) {
-          await removeContractFile(uploadedFile.path).catch(() => undefined);
+        if (isSchemaCacheMissingColumnError(insertError, "team_id")) {
+          const { data: fallbackContract, error: fallbackError } = await supabase
+            .from("contracts")
+            .insert(omitTeamId(payload))
+            .select("*")
+            .single();
+
+          if (fallbackError) {
+            if (uploadedFile?.path) {
+              await removeContractFile(uploadedFile.path).catch(() => undefined);
+            }
+            throw fallbackError;
+          }
+
+          persistedContract = fallbackContract as Contract;
+          savedWithoutTeamAssignment = true;
+        } else {
+          if (uploadedFile?.path) {
+            await removeContractFile(uploadedFile.path).catch(() => undefined);
+          }
+          throw insertError;
         }
-        throw insertError;
       }
 
       toast.success("Contrat ajoute");
+      if (savedWithoutTeamAssignment) {
+        toast.info("Contrat enregistre sans equipe. Applique la migration Supabase pour activer cette affectation.");
+      }
       await fetchContracts();
 
-      if (input.file && !input.uploadedFile && uploadedFile?.path && createdContract?.id) {
-        void runContractOcr(createdContract.id, { silent: true });
+      if (input.file && !input.uploadedFile && uploadedFile?.path && persistedContract?.id) {
+        void runContractOcr(persistedContract.id, { silent: true });
       }
 
-      return createdContract as Contract;
+      return persistedContract;
     } catch (err) {
       console.error("Error creating contract:", err);
       toast.error("Impossible d'ajouter le contrat");
@@ -378,16 +469,18 @@ export function useContracts(): UseContractsReturn {
         uploadedFile = await uploadContractFile(user.id, input.file);
       }
 
-      const noticeDeadline = calculateNoticeDeadline(input.end_date, input.renewal_notice_days);
+      const nextEndDate = input.end_date || deriveContractEndDate(input.start_date, input.renewal_period_months);
+      const noticeDeadline = calculateNoticeDeadline(nextEndDate, input.renewal_notice_days);
 
       const payload = {
         contract_label: input.contract_label.trim(),
         tool_name: input.tool_name.trim(),
         vendor_name: normalizeOptionalText(input.vendor_name),
+        team_id: input.team_id || null,
         status: input.status,
         source_url: normalizeOptionalUrl(input.source_url),
         start_date: input.start_date || null,
-        end_date: input.end_date || null,
+        end_date: nextEndDate || null,
         renewal_type: input.renewal_type,
         renewal_period_months: input.renewal_period_months ?? null,
         renewal_notice_days: input.renewal_notice_days ?? null,
@@ -423,11 +516,24 @@ export function useContracts(): UseContractsReturn {
         .update(payload)
         .eq("id", id);
 
-      if (updateError) {
+      let finalUpdateError = updateError;
+      let savedWithoutTeamAssignment = false;
+
+      if (updateError && isSchemaCacheMissingColumnError(updateError, "team_id")) {
+        const { error: fallbackError } = await supabase
+          .from("contracts")
+          .update(omitTeamId(payload))
+          .eq("id", id);
+
+        finalUpdateError = fallbackError;
+        savedWithoutTeamAssignment = !fallbackError;
+      }
+
+      if (finalUpdateError) {
         if (uploadedFile?.path) {
           await removeContractFile(uploadedFile.path).catch(() => undefined);
         }
-        throw updateError;
+        throw finalUpdateError;
       }
 
       if (uploadedFile?.path && existingFilePath && existingFilePath !== uploadedFile.path) {
@@ -435,6 +541,9 @@ export function useContracts(): UseContractsReturn {
       }
 
       toast.success("Contrat mis a jour");
+      if (savedWithoutTeamAssignment) {
+        toast.info("Contrat mis a jour sans equipe. Applique la migration Supabase pour activer cette affectation.");
+      }
       await fetchContracts();
 
       if (input.file && !input.uploadedFile && uploadedFile?.path) {
@@ -508,6 +617,7 @@ export function useContracts(): UseContractsReturn {
     deleteContract,
     runContractOcr,
     runContractTermsScan,
+    generateNonRenewalEmail,
     openContractFile,
   };
 }

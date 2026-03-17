@@ -19,6 +19,7 @@ import { ActionSelector } from "@/components/workflow/ActionSelector";
 import { StepConfigEditor } from "@/components/workflow/StepConfigEditor";
 import { StepsList } from "@/components/workflow/StepsList";
 import { supabase } from "@/integrations/supabase/client";
+import { canonicalActionId, createActionSnapshot } from "@/config/workflowActions";
 
 interface AddWorkflowModalProps {
   open: boolean;
@@ -180,18 +181,80 @@ export function AddWorkflowModal({ open, onOpenChange, onWorkflowCreated }: AddW
 
       // 2. Create workflow steps
       if (workflowSteps.length > 0) {
-        const stepsToInsert = workflowSteps.map((step, index) => ({
-          workflow_id: workflow.id,
-          action_id: step.action.id,
-          step_order: index + 1,
+        const stepsPayload = workflowSteps.map((step, index) => ({
+          action: step.action,
           config: step.config,
+          step_order: index + 1,
         }));
 
-        const { error: stepsError } = await (supabase as any)
-          .from('workflow_steps')
-          .insert(stepsToInsert);
+        const insertStepsLegacy = async () => {
+          const byIntegration = new Map<string, Set<string>>();
+          stepsPayload.forEach(s => {
+            const set = byIntegration.get(s.action.integration_id) ?? new Set<string>();
+            set.add(s.action.action_key);
+            byIntegration.set(s.action.integration_id, set);
+          });
 
-        if (stepsError) throw stepsError;
+          const idByCanonical = new Map<string, string>();
+          for (const [integrationId, actionKeys] of byIntegration.entries()) {
+            const { data, error } = await supabase
+              .from('workflow_actions')
+              .select('id, integration_id, action_key')
+              .eq('integration_id', integrationId)
+              // @ts-expect-error supabase types are stale in this repo
+              .in('action_key', Array.from(actionKeys));
+
+            if (error) throw error;
+
+            (data ?? []).forEach((row: unknown) => {
+              const typed = row as { id: string; integration_id: string; action_key: string };
+              idByCanonical.set(canonicalActionId(typed.integration_id, typed.action_key), typed.id);
+            });
+          }
+
+          const legacySteps: Array<Record<string, unknown>> = stepsPayload.map(step => {
+            const actionId = idByCanonical.get(canonicalActionId(step.action.integration_id, step.action.action_key));
+            if (!actionId) {
+              throw new Error(`Action introuvable dans workflow_actions: ${step.action.integration_id}:${step.action.action_key}`);
+            }
+            return {
+              workflow_id: workflow.id,
+              action_id: actionId,
+              step_order: step.step_order,
+              config: step.config,
+            };
+          });
+
+          const { error: stepsError } = await supabase
+            .from('workflow_steps')
+            // @ts-expect-error Supabase row types are stale in this repo.
+            .insert(legacySteps);
+
+          if (stepsError) throw stepsError;
+        };
+
+        try {
+          const stepsToInsert = stepsPayload.map(step => ({
+            workflow_id: workflow.id,
+            action_id: null,
+            integration_id: step.action.integration_id,
+            action_key: step.action.action_key,
+            action_snapshot: createActionSnapshot(step.action),
+            step_order: step.step_order,
+            config: step.config,
+          }));
+
+          const { error: stepsError } = await supabase
+            .from('workflow_steps')
+            // @ts-expect-error Supabase row types are stale in this repo.
+            .insert(stepsToInsert as unknown as Record<string, unknown>[]);
+
+          if (stepsError) {
+            throw stepsError;
+          }
+        } catch {
+          await insertStepsLegacy();
+        }
       }
 
       // 3. Create workflow variables based on config
@@ -218,9 +281,10 @@ export function AddWorkflowModal({ open, onOpenChange, onWorkflowCreated }: AddW
           required: true,
         }));
 
-        await (supabase as any)
+        await supabase
           .from('workflow_variables')
-          .insert(variablesToInsert);
+          // @ts-expect-error Supabase row types are stale in this repo.
+          .insert(variablesToInsert as unknown as Record<string, unknown>[]);
       }
 
       toast.success("Workflow créé", {

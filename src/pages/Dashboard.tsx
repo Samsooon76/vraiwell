@@ -1,6 +1,6 @@
 import { motion } from "framer-motion";
 import { Search, Filter, Plus, LayoutGrid, Plug, CreditCard, Users } from "lucide-react";
-import { useState, useEffect } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { ToolCard, Tool } from "@/components/tools/ToolCard";
 import { StatsCard } from "@/components/dashboard/StatsCard";
@@ -10,12 +10,14 @@ import { RequestToolModal } from "@/components/modals/RequestToolModal";
 import { ToolDetailsModal } from "@/components/modals/ToolDetailsModal";
 import { AccessRequestModal } from "@/components/modals/AccessRequestModal";
 import { useGoogleAuth } from "@/hooks/useGoogleAuth";
+import { useMicrosoftAuth } from "@/hooks/useMicrosoftAuth";
 import { useSlackAuth } from "@/hooks/useSlackAuth";
 import { useNotionAuth } from "@/hooks/useNotionAuth";
 import { useHubSpotAuth } from "@/hooks/useHubSpotAuth";
-import { useAuth } from "@/hooks/useAuth";
+import { useOnOffAuth } from "@/hooks/useOnOffAuth";
 
 const categories = ["Tous", "CRM", "Communication", "Productivité", "Développement", "Design", "RH"];
+const TOTAL_SUPPORTED_TOOLS = 6;
 
 export default function Dashboard() {
   const [searchQuery, setSearchQuery] = useState("");
@@ -24,37 +26,77 @@ export default function Dashboard() {
   const [selectedTool, setSelectedTool] = useState<Tool | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [accessRequestOpen, setAccessRequestOpen] = useState(false);
-  const [tools, setTools] = useState<Tool[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
 
-  const { fetchGoogleUsers, googleUsers, licenseInfo: googleLicenseInfo } = useGoogleAuth();
+  const {
+    fetchGoogleUsers,
+    googleUsers,
+    licenseInfo: googleLicenseInfo,
+    isConnected: isGoogleConnected,
+  } = useGoogleAuth();
+  const { isConnected: isMicrosoftConnected } = useMicrosoftAuth();
   const { hasToken: isSlackConnected } = useSlackAuth();
   const { hasToken: isNotionConnected } = useNotionAuth();
   const { hasToken: isHubSpotConnected, hubspotUsers } = useHubSpotAuth();
-  const { user } = useAuth();
+  const {
+    hasToken: isOnOffConnected,
+    fetchOnOffMembers,
+    members: onoffMembers,
+    workspaceInfo: onoffWorkspaceInfo,
+  } = useOnOffAuth();
 
-  // Check connections using cached user data (instant) and fetch Google users if connected
   useEffect(() => {
-    if (!user) {
-      setIsLoading(false);
+    if (!isGoogleConnected) {
       return;
     }
 
-    // Check identities from cached user data (no network call!)
-    const googleIdentity = user.identities?.find(i => i.provider === "google");
-    const microsoftIdentity = user.identities?.find(i => i.provider === "azure");
+    void fetchGoogleUsers();
+  }, [isGoogleConnected, fetchGoogleUsers]);
 
-    // Check localStorage for disabled state
-    const googleDisabled = localStorage.getItem("google_workspace_disabled") === user.id;
+  useEffect(() => {
+    if (!isOnOffConnected) {
+      return;
+    }
 
-    const isGoogleConnected = !!googleIdentity && !googleDisabled;
-    const isMicrosoftConnected = !!microsoftIdentity;
+    void fetchOnOffMembers();
+  }, [isOnOffConnected, fetchOnOffMembers]);
 
-    // Build initial tools list immediately (no waiting)
-    const initialTools: Tool[] = [];
+  const googleSeats = googleLicenseInfo?.totalUsers ?? googleUsers.length;
+  const googleUsedSeats = googleLicenseInfo?.usedLicenses ?? googleUsers.length;
+  const onoffMembersCount = onoffWorkspaceInfo?.totalMembers ?? onoffMembers.length;
+  const onoffNumbersCount = onoffMembers.reduce(
+    (total, member) => total + member.numberIdRefs.length,
+    0,
+  );
+
+  const tools = useMemo<Tool[]>(() => {
+    const connectedTools: Tool[] = [];
+
+    if (isGoogleConnected) {
+      connectedTools.push({
+        id: "google-workspace",
+        name: "Google Workspace",
+        description: "Suite bureautique cloud - Gmail, Drive, Calendar, Meet",
+        icon: "google",
+        category: "Productivité",
+        status: "active",
+        monthlySpend: 0,
+        seats: googleSeats,
+        usedSeats: googleUsedSeats,
+        stats: [
+          {
+            label: "Licences",
+            value: `${googleUsedSeats}/${googleSeats}`,
+          },
+          {
+            label: "Utilisateurs",
+            value: `${googleUsers.length}`,
+          },
+        ],
+      });
+    }
 
     if (isMicrosoftConnected) {
-      initialTools.push({
+      connectedTools.push({
         id: "microsoft-365",
         name: "Microsoft 365",
         description: "Suite Microsoft - Outlook, OneDrive, Teams, Office",
@@ -62,13 +104,21 @@ export default function Dashboard() {
         category: "Productivité",
         status: "active",
         monthlySpend: 0,
-        seats: 1,
-        usedSeats: 1,
+        stats: [
+          {
+            label: "Connexion",
+            value: "Active",
+          },
+          {
+            label: "Suite",
+            value: "Office",
+          },
+        ],
       });
     }
 
     if (isSlackConnected) {
-      initialTools.push({
+      connectedTools.push({
         id: "slack",
         name: "Slack",
         description: "Communication d'équipe en temps réel",
@@ -76,13 +126,21 @@ export default function Dashboard() {
         category: "Communication",
         status: "active",
         monthlySpend: 0,
-        seats: 0,
-        usedSeats: 0,
+        stats: [
+          {
+            label: "Connexion",
+            value: "Active",
+          },
+          {
+            label: "Canal",
+            value: "Chat",
+          },
+        ],
       });
     }
 
     if (isNotionConnected) {
-      initialTools.push({
+      connectedTools.push({
         id: "notion",
         name: "Notion",
         description: "Documentation et wiki collaboratif",
@@ -90,13 +148,21 @@ export default function Dashboard() {
         category: "Productivité",
         status: "active",
         monthlySpend: 0,
-        seats: 0,
-        usedSeats: 0,
+        stats: [
+          {
+            label: "Connexion",
+            value: "Active",
+          },
+          {
+            label: "Type",
+            value: "Docs",
+          },
+        ],
       });
     }
 
     if (isHubSpotConnected) {
-      initialTools.push({
+      connectedTools.push({
         id: "hubspot",
         name: "HubSpot",
         description: "CRM et marketing automation",
@@ -105,64 +171,57 @@ export default function Dashboard() {
         status: "active",
         monthlySpend: 0,
         seats: hubspotUsers?.length || 0,
-        usedSeats: hubspotUsers?.filter((u: any) => u.isActive)?.length || 0,
+        usedSeats: hubspotUsers?.filter((user) => user.isActive).length || 0,
+        stats: [
+          {
+            label: "Utilisateurs",
+            value: `${hubspotUsers?.length || 0}`,
+          },
+          {
+            label: "Actifs",
+            value: `${hubspotUsers?.filter((user) => user.isActive).length || 0}`,
+          },
+        ],
       });
     }
 
-    // Add Google Workspace immediately if connected (data will update when fetched)
-    if (isGoogleConnected) {
-      initialTools.push({
-        id: "google-workspace",
-        name: "Google Workspace",
-        description: "Suite bureautique cloud - Gmail, Drive, Calendar, Meet",
-        icon: "google",
-        category: "Productivité",
+    if (isOnOffConnected) {
+      connectedTools.push({
+        id: "onoff",
+        name: "OnOff Business",
+        description: "Téléphonie cloud professionnelle",
+        icon: "onoff",
+        category: "Communication",
         status: "active",
         monthlySpend: 0,
-        seats: 0,
-        usedSeats: 0,
+        stats: [
+          {
+            label: "Membres",
+            value: `${onoffMembersCount}`,
+          },
+          {
+            label: "Numéros",
+            value: `${onoffNumbersCount}`,
+          },
+        ],
       });
     }
 
-    setTools(initialTools);
-    setIsLoading(false);
-
-    // Fetch Google users in background to update seat counts
-    if (isGoogleConnected) {
-      fetchGoogleUsers();
-    }
-  }, [user, isSlackConnected, isNotionConnected, isHubSpotConnected, hubspotUsers]);
-
-  // Update tools when Google data arrives
-  useEffect(() => {
-    if (googleUsers.length > 0 || googleLicenseInfo) {
-      setTools(prev => {
-        // Check if Google Workspace already exists
-        const hasGoogle = prev.some(t => t.id === "google-workspace");
-        if (hasGoogle) {
-          // Update existing
-          return prev.map(t => t.id === "google-workspace" ? {
-            ...t,
-            seats: googleLicenseInfo?.totalUsers || googleUsers.length,
-            usedSeats: googleLicenseInfo?.usedLicenses || googleUsers.length,
-          } : t);
-        } else {
-          // Add new
-          return [...prev, {
-            id: "google-workspace",
-            name: "Google Workspace",
-            description: "Suite bureautique cloud - Gmail, Drive, Calendar, Meet",
-            icon: "google",
-            category: "Productivité",
-            status: "active" as const,
-            monthlySpend: 0,
-            seats: googleLicenseInfo?.totalUsers || googleUsers.length,
-            usedSeats: googleLicenseInfo?.usedLicenses || googleUsers.length,
-          }];
-        }
-      });
-    }
-  }, [googleUsers, googleLicenseInfo]);
+    return connectedTools;
+  }, [
+    googleSeats,
+    googleUsedSeats,
+    googleUsers.length,
+    hubspotUsers,
+    isGoogleConnected,
+    isHubSpotConnected,
+    isMicrosoftConnected,
+    isNotionConnected,
+    isOnOffConnected,
+    isSlackConnected,
+    onoffMembersCount,
+    onoffNumbersCount,
+  ]);
 
   const filteredTools = tools.filter((tool) => {
     const matchesSearch = tool.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -172,6 +231,7 @@ export default function Dashboard() {
   });
 
   const activeTools = tools.filter(t => t.status === "active");
+  const connectedIntegrations = tools.length;
   const totalSpend = activeTools.reduce((sum, t) => sum + (t.monthlySpend || 0), 0);
   const totalSeats = activeTools.reduce((sum, t) => sum + (t.seats || 0), 0);
   const usedSeats = activeTools.reduce((sum, t) => sum + (t.usedSeats || 0), 0);
@@ -201,7 +261,7 @@ export default function Dashboard() {
           <StatsCard
             title="Outils actifs"
             value={activeTools.length}
-            subtitle={`sur ${tools.length} disponibles`}
+            subtitle={`sur ${TOTAL_SUPPORTED_TOOLS} disponibles`}
             icon={Plug}
             variant="primary"
           />
@@ -220,7 +280,7 @@ export default function Dashboard() {
           />
           <StatsCard
             title="Intégrations"
-            value={activeTools.length}
+            value={connectedIntegrations}
             subtitle="connectées"
             icon={LayoutGrid}
           />
@@ -287,6 +347,7 @@ export default function Dashboard() {
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.1 * index }}
+              className="h-full"
             >
               <ToolCard
                 tool={tool}

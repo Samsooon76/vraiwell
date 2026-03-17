@@ -1,6 +1,10 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
+import {
+    emitIntegrationConnectionChanged,
+    subscribeIntegrationConnectionChanges,
+} from "@/lib/integration-events";
 
 export const HUBSPOT_TOKEN_KEY = "hubspot_provider_token";
 
@@ -30,20 +34,36 @@ export function useHubSpotAuth() {
     // Simplified hasToken check for UI state
     const [hasToken, setHasToken] = useState(false);
 
-    useEffect(() => {
-        const checkToken = async () => {
-            const { data: { user } } = await supabase.auth.getUser();
-            if (user) {
-                const { data } = await supabase
-                    .from("profiles")
-                    .select("hubspot_token")
-                    .eq("user_id", user.id)
-                    .single();
-                setHasToken(!!data?.hubspot_token);
-            }
-        };
-        checkToken();
+    const refreshHubSpotConnection = useCallback(async () => {
+        const { data: { user } } = await supabase.auth.getUser();
+
+        if (!user) {
+            setHasToken(false);
+            return false;
+        }
+
+        const { data } = await supabase
+            .from("profiles")
+            .select("hubspot_token")
+            .eq("user_id", user.id)
+            .single();
+
+        const nextHasToken = !!data?.hubspot_token;
+        setHasToken(nextHasToken);
+        return nextHasToken;
     }, []);
+
+    useEffect(() => {
+        void refreshHubSpotConnection();
+
+        const unsubscribeConnectionChanges = subscribeIntegrationConnectionChanges("hubspot", () => {
+            void refreshHubSpotConnection();
+        });
+
+        return () => {
+            unsubscribeConnectionChanges();
+        };
+    }, [refreshHubSpotConnection]);
 
     const connectHubSpot = async () => {
         setIsConnecting(true);
@@ -78,6 +98,8 @@ export function useHubSpotAuth() {
                         .eq("user_id", user.id);
                 }
 
+                setHasToken(true);
+                emitIntegrationConnectionChanged("hubspot");
                 toast.success("HubSpot connecté avec succès !");
 
                 // Clean URL
@@ -146,8 +168,10 @@ export function useHubSpotAuth() {
                     .update({ hubspot_token: null })
                     .eq("user_id", user.id);
             }
+            setHasToken(false);
             setHubSpotUsers([]);
             setWorkspaceInfo(null);
+            emitIntegrationConnectionChanged("hubspot");
             return { success: true };
         } catch (err: any) {
             return { success: false, error: err.message };

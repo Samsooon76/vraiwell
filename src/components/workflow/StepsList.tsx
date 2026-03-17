@@ -1,4 +1,4 @@
-import { WorkflowStep, WorkflowAction } from "@/types/workflow";
+import { WorkflowAction } from "@/types/workflow";
 import { ToolLogo } from "@/components/tools/ToolLogo";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -10,6 +10,7 @@ import {
     GripVertical,
     ArrowRight
 } from "lucide-react";
+import { getIntegrationLabel } from "@/config/workflowActions";
 
 interface StepsListProps {
     steps: Array<{
@@ -22,14 +23,6 @@ interface StepsListProps {
     onRemove: (index: number) => void;
     onEdit: (index: number) => void;
 }
-
-const integrationLabels: Record<string, string> = {
-    google: "Google Workspace",
-    microsoft: "Microsoft 365",
-    slack: "Slack",
-    notion: "Notion",
-    hubspot: "HubSpot",
-};
 
 export function StepsList({
     steps,
@@ -60,7 +53,7 @@ export function StepsList({
 
                         <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary/10">
                             <ToolLogo
-                                name={integrationLabels[step.action.integration_id]}
+                                name={getIntegrationLabel(step.action.integration_id)}
                                 size="sm"
                                 className="h-4 w-4"
                             />
@@ -71,9 +64,15 @@ export function StepsList({
                                 {step.action.name}
                             </p>
                             <p className="text-xs text-muted-foreground truncate">
-                                {integrationLabels[step.action.integration_id]}
+                                {getIntegrationLabel(step.action.integration_id)}
                             </p>
                         </div>
+
+                        {!step.action.is_active && (
+                            <Badge variant="outline" className="text-xs text-muted-foreground">
+                                Action indisponible
+                            </Badge>
+                        )}
 
                         {/* Config preview */}
                         {Object.keys(step.config).length > 0 && (

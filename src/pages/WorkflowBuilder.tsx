@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { motion } from "framer-motion";
 import {
@@ -24,6 +24,7 @@ import { useWorkflowActions } from "@/hooks/useWorkflowActions";
 import { ActionSelector } from "@/components/workflow/ActionSelector";
 import { StepConfigEditor } from "@/components/workflow/StepConfigEditor";
 import { ToolLogo } from "@/components/tools/ToolLogo";
+import { canonicalActionId, createActionSnapshot, getIntegrationLabel, resolveWorkflowAction } from "@/config/workflowActions";
 
 interface WorkflowStepDraft {
     id: string;
@@ -38,14 +39,6 @@ const workflowTypes = [
 ] as const;
 
 type WorkflowType = typeof workflowTypes[number]["id"];
-
-const integrationLabels: Record<string, string> = {
-    google: "Google Workspace",
-    microsoft: "Microsoft 365",
-    slack: "Slack",
-    notion: "Notion",
-    hubspot: "HubSpot",
-};
 
 export default function WorkflowBuilder() {
     const navigate = useNavigate();
@@ -67,14 +60,57 @@ export default function WorkflowBuilder() {
     // Actions from database
     const { actions, connectedIntegrations, isLoading: actionsLoading } = useWorkflowActions();
 
-    // Load existing workflow if editing
-    useEffect(() => {
-        if (isEditMode && id) {
-            loadWorkflow(id);
-        }
-    }, [id, isEditMode]);
+    const insertStepsLegacy = async (workflowId: string, stepsToInsert: Array<{
+        action: WorkflowAction;
+        config: Record<string, unknown>;
+        step_order: number;
+    }>) => {
+        const byIntegration = new Map<string, Set<string>>();
+        stepsToInsert.forEach(s => {
+            const set = byIntegration.get(s.action.integration_id) ?? new Set<string>();
+            set.add(s.action.action_key);
+            byIntegration.set(s.action.integration_id, set);
+        });
 
-    const loadWorkflow = async (workflowId: string) => {
+        const idByCanonical = new Map<string, string>();
+        for (const [integrationId, actionKeys] of byIntegration.entries()) {
+            const { data, error } = await supabase
+                .from('workflow_actions')
+                .select('id, integration_id, action_key')
+                .eq('integration_id', integrationId)
+                // @ts-expect-error supabase types are stale in this repo
+                .in('action_key', Array.from(actionKeys));
+
+            if (error) throw error;
+
+            (data ?? []).forEach((row: unknown) => {
+                const typed = row as { id: string; integration_id: string; action_key: string };
+                idByCanonical.set(canonicalActionId(typed.integration_id, typed.action_key), typed.id);
+            });
+        }
+
+        const legacySteps: Array<Record<string, unknown>> = stepsToInsert.map(step => {
+            const actionId = idByCanonical.get(canonicalActionId(step.action.integration_id, step.action.action_key));
+            if (!actionId) {
+                throw new Error(`Action introuvable dans workflow_actions: ${step.action.integration_id}:${step.action.action_key}`);
+            }
+            return {
+                workflow_id: workflowId,
+                action_id: actionId,
+                step_order: step.step_order,
+                config: step.config,
+            };
+        });
+
+        const { error: stepsError } = await supabase
+            .from('workflow_steps')
+            // @ts-expect-error Supabase row types are stale in this repo.
+            .insert(legacySteps);
+
+        if (stepsError) throw stepsError;
+    };
+
+    const loadWorkflow = useCallback(async (workflowId: string) => {
         setIsLoading(true);
         try {
             // Fetch workflow
@@ -90,20 +126,47 @@ export default function WorkflowBuilder() {
             setType(workflow.type as WorkflowType);
             setDescription(workflow.description || "");
 
-            // Fetch steps with actions
-            const { data: stepsData, error: stepsError } = await (supabase as any)
-                .from('workflow_steps')
-                .select('*, action:workflow_actions(*)')
-                .eq('workflow_id', workflowId)
-                .order('step_order', { ascending: true });
+            let stepsData: unknown[] = [];
+            try {
+                const { data, error } = await supabase
+                    .from('workflow_steps')
+                    .select('id, config, step_order, integration_id, action_key, action_snapshot, action_id')
+                    .eq('workflow_id', workflowId)
+                    .order('step_order', { ascending: true });
+                if (error) throw error;
+                stepsData = data ?? [];
+            } catch (err) {
+                // Backward compatibility: schema may not have integration_id/action_key yet.
+                const { data, error } = await supabase
+                    .from('workflow_steps')
+                    .select('*, action:workflow_actions(*)')
+                    .eq('workflow_id', workflowId)
+                    .order('step_order', { ascending: true });
+                if (error) throw error;
+                stepsData = data ?? [];
+            }
 
-            if (stepsError) throw stepsError;
+            setSteps(stepsData.map((s: unknown) => {
+                const typed = s as {
+                    id: string;
+                    config?: Record<string, unknown> | null;
+                    integration_id?: string | null;
+                    action_key?: string | null;
+                    action_snapshot?: unknown;
+                    action?: { integration_id?: string | null; action_key?: string | null } & Record<string, unknown>;
+                };
+                const resolved = resolveWorkflowAction({
+                    integration_id: typed.integration_id ?? typed.action?.integration_id,
+                    action_key: typed.action_key ?? typed.action?.action_key,
+                    action_snapshot: typed.action_snapshot ?? typed.action ?? null,
+                });
 
-            setSteps(stepsData.map((s: any) => ({
-                id: s.id,
-                action: s.action,
-                config: s.config || {},
-            })));
+                return {
+                    id: typed.id,
+                    action: resolved.action,
+                    config: typed.config || {},
+                };
+            }));
 
         } catch (error) {
             console.error('Error loading workflow:', error);
@@ -112,7 +175,14 @@ export default function WorkflowBuilder() {
         } finally {
             setIsLoading(false);
         }
-    };
+    }, [navigate]);
+
+    // Load existing workflow if editing
+    useEffect(() => {
+        if (isEditMode && id) {
+            void loadWorkflow(id);
+        }
+    }, [id, isEditMode, loadWorkflow]);
 
     const handleAddAction = (action: WorkflowAction) => {
         const newStep: WorkflowStepDraft = {
@@ -177,7 +247,7 @@ export default function WorkflowBuilder() {
                 if (updateError) throw updateError;
 
                 // Delete existing steps
-                await (supabase as any)
+                await supabase
                     .from('workflow_steps')
                     .delete()
                     .eq('workflow_id', id);
@@ -202,18 +272,35 @@ export default function WorkflowBuilder() {
 
             // Insert steps
             if (steps.length > 0 && workflowId) {
-                const stepsToInsert = steps.map((step, index) => ({
-                    workflow_id: workflowId,
-                    action_id: step.action.id,
-                    step_order: index + 1,
+                const stepsPayload = steps.map((step, index) => ({
+                    action: step.action,
                     config: step.config,
+                    step_order: index + 1,
                 }));
 
-                const { error: stepsError } = await (supabase as any)
-                    .from('workflow_steps')
-                    .insert(stepsToInsert);
+                try {
+                    const stepsToInsert = stepsPayload.map(step => ({
+                        workflow_id: workflowId,
+                        action_id: null,
+                        integration_id: step.action.integration_id,
+                        action_key: step.action.action_key,
+                        action_snapshot: createActionSnapshot(step.action),
+                        step_order: step.step_order,
+                        config: step.config,
+                    }));
 
-                if (stepsError) throw stepsError;
+                    const { error: stepsError } = await supabase
+                        .from('workflow_steps')
+                        // @ts-expect-error Supabase row types are stale in this repo.
+                        .insert(stepsToInsert as unknown as Record<string, unknown>[]);
+
+                    if (stepsError) {
+                        throw stepsError;
+                    }
+                } catch (err) {
+                    // Legacy fallback: action_id is required and integration_id/action_key columns may not exist.
+                    await insertStepsLegacy(workflowId, stepsPayload);
+                }
             }
 
             // Extract and save variables
@@ -229,24 +316,27 @@ export default function WorkflowBuilder() {
                 });
             });
 
-            if (variables.size > 0 && workflowId) {
-                // Delete existing variables
-                await (supabase as any)
+            if (workflowId) {
+                // Always reset variables to avoid stale prompts after edits.
+                await supabase
                     .from('workflow_variables')
                     .delete()
                     .eq('workflow_id', workflowId);
 
-                const variablesToInsert = Array.from(variables).map(varName => ({
-                    workflow_id: workflowId,
-                    name: varName,
-                    label: varName.charAt(0).toUpperCase() + varName.slice(1).replace(/([A-Z])/g, ' $1'),
-                    type: varName.toLowerCase().includes('email') ? 'email' : 'string',
-                    required: true,
-                }));
+                if (variables.size > 0) {
+                    const variablesToInsert = Array.from(variables).map(varName => ({
+                        workflow_id: workflowId,
+                        name: varName,
+                        label: varName.charAt(0).toUpperCase() + varName.slice(1).replace(/([A-Z])/g, ' $1'),
+                        type: varName.toLowerCase().includes('email') ? 'email' : 'string',
+                        required: true,
+                    }));
 
-                await (supabase as any)
-                    .from('workflow_variables')
-                    .insert(variablesToInsert);
+                    await supabase
+                        .from('workflow_variables')
+                        // @ts-expect-error Supabase row types are stale in this repo.
+                        .insert(variablesToInsert as unknown as Record<string, unknown>[]);
+                }
             }
 
             toast.success(isEditMode ? "Workflow mis à jour" : "Workflow créé", {
@@ -409,7 +499,7 @@ export default function WorkflowBuilder() {
                                     <div className="flex items-center gap-3">
                                         <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
                                             <ToolLogo
-                                                name={integrationLabels[step.action.integration_id]}
+                                                name={getIntegrationLabel(step.action.integration_id)}
                                                 size="sm"
                                                 className="h-5 w-5"
                                             />
@@ -417,7 +507,7 @@ export default function WorkflowBuilder() {
                                         <div className="flex-1 min-w-0">
                                             <p className="font-semibold truncate">{step.action.name}</p>
                                             <p className="text-sm text-muted-foreground truncate">
-                                                {integrationLabels[step.action.integration_id]}
+                                                {getIntegrationLabel(step.action.integration_id)}
                                             </p>
                                         </div>
                                         <div className="flex items-center gap-1">
@@ -522,14 +612,14 @@ export default function WorkflowBuilder() {
                             <div className="flex-1 overflow-y-auto p-4">
                                 <div className="flex items-center gap-3 mb-6 p-3 rounded-lg bg-muted">
                                     <ToolLogo
-                                        name={integrationLabels[selectedStep.action.integration_id]}
+                                        name={getIntegrationLabel(selectedStep.action.integration_id)}
                                         size="sm"
                                         className="h-6 w-6"
                                     />
                                     <div>
                                         <p className="font-medium">{selectedStep.action.name}</p>
                                         <p className="text-xs text-muted-foreground">
-                                            {integrationLabels[selectedStep.action.integration_id]}
+                                            {getIntegrationLabel(selectedStep.action.integration_id)}
                                         </p>
                                     </div>
                                 </div>

@@ -47,6 +47,8 @@ type ExtractedSignals = {
   renewalNoticeDays: number | null;
   renewalPeriodMonths: number | null;
   candidateDates: string[];
+  contactEmails: string[];
+  candidateDomains: string[];
   matchedSnippets: string[];
 };
 
@@ -137,10 +139,361 @@ function normalizeText(value: string) {
     .toLowerCase();
 }
 
+function normalizeDomain(value?: string | null) {
+  if (!value) {
+    return null;
+  }
+
+  return value
+    .replace(/^mailto:/i, "")
+    .replace(/^https?:\/\//i, "")
+    .replace(/^www\./i, "")
+    .replace(/\/.*$/, "")
+    .trim()
+    .toLowerCase() || null;
+}
+
+function isGenericPublicEmailDomain(domain: string) {
+  return [
+    "gmail.com",
+    "googlemail.com",
+    "outlook.com",
+    "hotmail.com",
+    "live.com",
+    "yahoo.com",
+    "icloud.com",
+    "proton.me",
+    "protonmail.com",
+  ].includes(domain);
+}
+
+function extractContactSignals(text: string) {
+  const emailMatches = Array.from(
+    new Set(
+      (text.match(/\b[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}\b/g) ?? [])
+        .map((value) => value.trim().toLowerCase()),
+    ),
+  );
+
+  const domainCounts = new Map<string, number>();
+
+  for (const email of emailMatches) {
+    const domain = normalizeDomain(email.split("@")[1]);
+    if (!domain || isGenericPublicEmailDomain(domain)) {
+      continue;
+    }
+
+    domainCounts.set(domain, (domainCounts.get(domain) ?? 0) + 3);
+  }
+
+  for (const match of text.match(/\bhttps?:\/\/[^\s)>"']+/g) ?? []) {
+    const domain = normalizeDomain(match);
+    if (!domain) {
+      continue;
+    }
+
+    domainCounts.set(domain, (domainCounts.get(domain) ?? 0) + 1);
+  }
+
+  const candidateDomains = [...domainCounts.entries()]
+    .sort((left, right) => right[1] - left[1])
+    .map(([domain]) => domain)
+    .slice(0, 5);
+
+  return {
+    contactEmails: emailMatches.slice(0, 8),
+    candidateDomains,
+  };
+}
+
+const genericDomainFragments = new Set([
+  "app",
+  "business",
+  "cloud",
+  "portal",
+  "support",
+  "admin",
+  "legal",
+  "service",
+  "services",
+  "software",
+  "saas",
+  "online",
+  "mail",
+  "team",
+  "teams",
+  "www",
+]);
+
+function normalizeComparableLabel(value?: string | null) {
+  if (!value) {
+    return "";
+  }
+
+  return normalizeText(value)
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function collapseComparableLabel(value?: string | null) {
+  return normalizeComparableLabel(value).replace(/\s+/g, "");
+}
+
+function getComparableTokens(value?: string | null) {
+  return normalizeComparableLabel(value)
+    .split(" ")
+    .filter((token) => token.length >= 2);
+}
+
+function getTokenOverlapRatio(left?: string | null, right?: string | null) {
+  const leftTokens = getComparableTokens(left);
+  const rightTokens = new Set(getComparableTokens(right));
+
+  if (!leftTokens.length || !rightTokens.size) {
+    return 0;
+  }
+
+  const overlapCount = leftTokens.filter((token) => rightTokens.has(token)).length;
+  return overlapCount / leftTokens.length;
+}
+
+function splitDomainLabel(label: string) {
+  const normalizedLabel = normalizeText(label).replace(/[^a-z0-9-]+/g, "");
+  if (!normalizedLabel) {
+    return [];
+  }
+
+  const segments = normalizedLabel
+    .split("-")
+    .flatMap((segment) => {
+      if (!segment) {
+        return [];
+      }
+
+      for (const suffix of genericDomainFragments) {
+        if (segment !== suffix && segment.endsWith(suffix) && segment.length > suffix.length + 2) {
+          return [segment.slice(0, -suffix.length), suffix];
+        }
+      }
+
+      return [segment];
+    })
+    .filter((segment) => segment.length >= 2);
+
+  return Array.from(new Set(segments));
+}
+
+function extractBrandTokensFromDomain(domain: string) {
+  const normalizedDomain = normalizeDomain(domain);
+  if (!normalizedDomain) {
+    return [];
+  }
+
+  const labels = normalizedDomain.split(".").filter(Boolean);
+  if (!labels.length) {
+    return [];
+  }
+
+  const topLevelLabelIndex = labels.length >= 2 ? labels.length - 2 : 0;
+  const effectiveLabelIndex =
+    labels.length >= 3 && labels[labels.length - 1].length === 2 && labels[labels.length - 2].length <= 3
+      ? labels.length - 3
+      : topLevelLabelIndex;
+
+  const candidateLabels = [
+    labels[effectiveLabelIndex],
+    labels[effectiveLabelIndex - 1] ?? null,
+  ].filter((value): value is string => Boolean(value));
+
+  return Array.from(
+    new Set(
+      candidateLabels
+        .flatMap((label) => splitDomainLabel(label))
+        .filter((token) => token.length >= 3 && !genericDomainFragments.has(token)),
+    ),
+  );
+}
+
+function getPreferredBrandToken(domains: string[]) {
+  const tokenScores = new Map<string, number>();
+
+  for (const domain of domains) {
+    const brandTokens = extractBrandTokensFromDomain(domain);
+    brandTokens.forEach((token, index) => {
+      tokenScores.set(token, (tokenScores.get(token) ?? 0) + (index === 0 ? 4 : 1));
+    });
+  }
+
+  return [...tokenScores.entries()]
+    .sort((left, right) => right[1] - left[1] || left[0].length - right[0].length)
+    .map(([token]) => token)[0] ?? null;
+}
+
+function formatBrandLabel(token?: string | null) {
+  if (!token) {
+    return null;
+  }
+
+  return token
+    .split(/[\s_-]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function nameMatchesBrandToken(name?: string | null, brandToken?: string | null) {
+  if (!name || !brandToken) {
+    return false;
+  }
+
+  const collapsedName = collapseComparableLabel(name);
+  const collapsedToken = collapseComparableLabel(brandToken);
+
+  return Boolean(collapsedName && collapsedToken && (
+    collapsedName.includes(collapsedToken) ||
+    collapsedToken.includes(collapsedName)
+  ));
+}
+
+function looksLikeCustomerEntity(name?: string | null, contractLabel?: string | null, brandToken?: string | null) {
+  const tokens = getComparableTokens(name);
+  return (
+    tokens.length >= 2 &&
+    !nameMatchesBrandToken(name, brandToken) &&
+    getTokenOverlapRatio(name, contractLabel) >= 0.8
+  );
+}
+
+function reconcileEntitySignals(signals: ExtractedSignals) {
+  const preferredBrandToken = getPreferredBrandToken(signals.candidateDomains);
+  if (!preferredBrandToken) {
+    return signals;
+  }
+
+  const derivedBrandLabel = formatBrandLabel(preferredBrandToken);
+  const toolMatchesBrand = nameMatchesBrandToken(signals.toolName, preferredBrandToken);
+  const vendorMatchesBrand = nameMatchesBrandToken(signals.vendorName, preferredBrandToken);
+
+  let toolName = signals.toolName;
+  let vendorName = signals.vendorName;
+
+  if (looksLikeCustomerEntity(toolName, signals.contractLabel, preferredBrandToken)) {
+    toolName = vendorMatchesBrand && vendorName ? vendorName : derivedBrandLabel;
+  }
+
+  if (looksLikeCustomerEntity(vendorName, signals.contractLabel, preferredBrandToken)) {
+    vendorName = toolMatchesBrand && toolName ? toolName : derivedBrandLabel;
+  }
+
+  if (!vendorName) {
+    vendorName = toolMatchesBrand && toolName ? toolName : derivedBrandLabel;
+  }
+
+  if (!toolName) {
+    toolName = vendorName ?? toolName;
+  }
+
+  return {
+    ...signals,
+    toolName,
+    vendorName,
+  };
+}
+
 function toIsoDate(year: number, month: number, day: number) {
   const normalizedMonth = String(month).padStart(2, "0");
   const normalizedDay = String(day).padStart(2, "0");
   return `${year}-${normalizedMonth}-${normalizedDay}`;
+}
+
+function addMonthsToIsoDate(isoDate?: string | null, monthsToAdd?: number | null) {
+  if (!isoDate || !monthsToAdd || monthsToAdd <= 0) {
+    return null;
+  }
+
+  const match = isoDate.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) {
+    return null;
+  }
+
+  const year = Number.parseInt(match[1], 10);
+  const month = Number.parseInt(match[2], 10);
+  const day = Number.parseInt(match[3], 10);
+
+  const target = new Date(Date.UTC(year, month - 1, day));
+  const originalDay = target.getUTCDate();
+
+  target.setUTCMonth(target.getUTCMonth() + monthsToAdd);
+  if (target.getUTCDate() !== originalDay) {
+    target.setUTCDate(0);
+  }
+
+  return target.toISOString().slice(0, 10);
+}
+
+function normalizeDurationToMonths(value: string, unit: string) {
+  const amount = Number.parseInt(value, 10);
+  if (Number.isNaN(amount) || amount <= 0) {
+    return null;
+  }
+
+  const normalizedUnit = normalizeText(unit);
+  if (/^(an|ans|annee|annees|year|years)$/.test(normalizedUnit)) {
+    return amount * 12;
+  }
+
+  if (/^(mois|month|months)$/.test(normalizedUnit)) {
+    return amount;
+  }
+
+  return null;
+}
+
+function extractCommitmentTerm(text: string) {
+  const normalizedText = normalizeText(text);
+  const patterns: Array<{
+    pattern: RegExp;
+    valueIndex: number;
+    unitIndex: number;
+  }> = [
+    {
+      pattern:
+        /(duree d[' ]engagement|duree initiale|periode initiale|initial term|initial commitment|commitment period)[^.\n\r]{0,80}?(\d{1,2})\s*(mois|month|months|an|ans|annee|annees|year|years)/,
+      valueIndex: 2,
+      unitIndex: 3,
+    },
+    {
+      pattern: /engagement[^.\n\r]{0,80}?(\d{1,2})\s*(mois|month|months|an|ans|annee|annees|year|years)/,
+      valueIndex: 1,
+      unitIndex: 2,
+    },
+    {
+      pattern:
+        /(\d{1,2})\s*(mois|month|months|an|ans|annee|annees|year|years)[^.\n\r]{0,80}?(d[' ]engagement|duree initiale|periode initiale|initial term|commitment)/,
+      valueIndex: 1,
+      unitIndex: 2,
+    },
+  ];
+
+  for (const { pattern, valueIndex, unitIndex } of patterns) {
+    const match = normalizedText.match(pattern);
+    if (!match) {
+      continue;
+    }
+
+    const value = match[valueIndex];
+    const unit = match[unitIndex];
+    const months = normalizeDurationToMonths(value, unit);
+
+    if (months) {
+      return {
+        months,
+        snippet: match[0],
+      };
+    }
+  }
+
+  return null;
 }
 
 function parseDateToken(rawValue: string) {
@@ -262,7 +615,7 @@ function extractContractSignals(text: string): ExtractedSignals {
 
     if (
       !startDate &&
-      /(date d'effet|date de debut|debut du contrat|date de commencement|effective date|start date|commencement date)/.test(normalized)
+      /(date d'effet|date de debut|debut du contrat|date de commencement|date d'activation|date activation|effective date|start date|commencement date|activation date)/.test(normalized)
     ) {
       startDate = parsedDate;
       matchedSnippets.push(joined);
@@ -279,6 +632,7 @@ function extractContractSignals(text: string): ExtractedSignals {
   }
 
   const normalizedText = normalizeText(text);
+  const contactSignals = extractContactSignals(text);
 
   let renewalType: "none" | "manual" | "tacit" = "none";
   if (
@@ -315,6 +669,12 @@ function extractContractSignals(text: string): ExtractedSignals {
     renewalPeriodMonths = 12;
   }
 
+  const commitmentTerm = extractCommitmentTerm(text);
+  if (!endDate && startDate && commitmentTerm) {
+    endDate = addMonthsToIsoDate(startDate, commitmentTerm.months);
+    matchedSnippets.push(commitmentTerm.snippet);
+  }
+
   return {
     documentType: "other",
     contractLabel: null,
@@ -326,6 +686,8 @@ function extractContractSignals(text: string): ExtractedSignals {
     renewalNoticeDays,
     renewalPeriodMonths,
     candidateDates: Array.from(candidateDates).sort(),
+    contactEmails: contactSignals.contactEmails,
+    candidateDomains: contactSignals.candidateDomains,
     matchedSnippets: Array.from(new Set(matchedSnippets)).slice(0, 10),
   };
 }
@@ -407,7 +769,11 @@ function extractChatMessageContent(response: ChatCompletionResponse) {
   return null;
 }
 
-async function callMistralStructuredExtraction(markdownText: string, apiKey: string) {
+async function callMistralStructuredExtraction(
+  markdownText: string,
+  heuristicSignals: Pick<ExtractedSignals, "candidateDomains" | "contactEmails" | "matchedSnippets">,
+  apiKey: string,
+) {
   const response = await fetch("https://api.mistral.ai/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -427,9 +793,13 @@ async function callMistralStructuredExtraction(markdownText: string, apiKey: str
             "You extract subscription and contract metadata from OCR text. Return JSON only. " +
             "Use invoice or receipt billing periods when explicit contract start/end dates are absent. " +
             "If a next billing or next invoice date clearly indicates an automatic recurring subscription, set renewalType to tacit. " +
+            "If the OCR text explicitly states an initial commitment or contract duration in months or years tied to activation, effective date, or start date, you may compute endDate from startDate when no explicit end date is written. " +
             "Only set renewalNoticeDays or renewalPeriodMonths when they are explicitly supported by the OCR text. " +
             "Do not infer notice period from common SaaS practices, default legal assumptions, or contract duration. " +
+            "Do not confuse initial commitment duration with renewalPeriodMonths unless the OCR text explicitly describes the renewal cadence. " +
             "Do not derive renewalPeriodMonths from the time span between startDate and endDate unless the OCR text explicitly states a renewal cadence such as monthly, annual, yearly, or X months. " +
+            "Never use the buyer, customer, client, or contracting company name as toolName or vendorName when supplier emails, URLs, or domains point to a different provider. " +
+            "Prefer supplier or product names that are consistent with supplier emails, websites, and domains found in the OCR text. " +
             "Dates must be YYYY-MM-DD. Use null when unknown. " +
             "Return exactly these keys: " +
             "documentType, contractLabel, toolName, vendorName, startDate, endDate, renewalType, renewalNoticeDays, renewalPeriodMonths, matchedSnippets, confidenceNotes.",
@@ -441,12 +811,19 @@ async function callMistralStructuredExtraction(markdownText: string, apiKey: str
             "Rules:\n" +
             "- documentType must be one of contract, invoice, receipt, quote, other.\n" +
             "- renewalType must be one of none, manual, tacit.\n" +
+            "- If an explicit initial commitment duration is stated (example: 12 months from activation), compute endDate from startDate when possible even if the end date is not written explicitly.\n" +
             "- renewalNoticeDays must be null unless the OCR text explicitly mentions notice or preavis in days.\n" +
+            "- Do not put an initial commitment duration into renewalPeriodMonths unless the OCR text explicitly says it is the renewal cadence.\n" +
             "- renewalPeriodMonths must be null unless the OCR text explicitly mentions a renewal cadence such as monthly, annual, yearly, or X months.\n" +
             "- matchedSnippets must contain short supporting excerpts from the OCR text.\n" +
             "- contractLabel should be a concise label for the agreement, invoice, or subscription when identifiable.\n" +
             "- toolName should be the product or software name when identifiable.\n" +
-            "- vendorName should be the company issuing the document when identifiable.\n\n" +
+            "- vendorName should be the company issuing the document when identifiable.\n" +
+            "- Do not confuse the customer or buyer name with the supplier, vendor, or tool.\n\n" +
+            "Heuristic hints from emails and URLs:\n" +
+            `- contactEmails: ${heuristicSignals.contactEmails.join(", ") || "none"}\n` +
+            `- candidateDomains: ${heuristicSignals.candidateDomains.join(", ") || "none"}\n` +
+            `- matchedSnippets: ${heuristicSignals.matchedSnippets.join(" | ") || "none"}\n\n` +
             markdownText,
         },
       ],
@@ -480,10 +857,10 @@ function mergeExtractedSignals(
   structuredExtraction: StructuredExtraction | null,
 ): ExtractedSignals {
   if (!structuredExtraction) {
-    return heuristicSignals;
+    return reconcileEntitySignals(heuristicSignals);
   }
 
-  return {
+  return reconcileEntitySignals({
     documentType: structuredExtraction.documentType,
     contractLabel: structuredExtraction.contractLabel,
     toolName: structuredExtraction.toolName,
@@ -497,13 +874,15 @@ function mergeExtractedSignals(
     renewalNoticeDays: structuredExtraction.renewalNoticeDays ?? heuristicSignals.renewalNoticeDays,
     renewalPeriodMonths: structuredExtraction.renewalPeriodMonths ?? heuristicSignals.renewalPeriodMonths,
     candidateDates: heuristicSignals.candidateDates,
+    contactEmails: heuristicSignals.contactEmails,
+    candidateDomains: heuristicSignals.candidateDomains,
     matchedSnippets: Array.from(
       new Set([
         ...structuredExtraction.matchedSnippets,
         ...heuristicSignals.matchedSnippets,
       ]),
     ).slice(0, 10),
-  };
+  });
 }
 
 function calculateNoticeDeadline(endDate?: string | null, noticeDays?: number | null) {
@@ -578,7 +957,7 @@ async function processFileWithOcr(
 
   const heuristicSignals = extractContractSignals(markdownText);
   const structuredExtraction = markdownText
-    ? await callMistralStructuredExtraction(markdownText, apiKey).catch((error) => {
+    ? await callMistralStructuredExtraction(markdownText, heuristicSignals, apiKey).catch((error) => {
       console.error("Structured extraction error:", error);
       return null;
     })
@@ -707,7 +1086,12 @@ Deno.serve(async (req) => {
     }
 
     const nextStartDate = currentContract.start_date ?? ocrResult.extractedSignals.startDate;
-    const nextEndDate = currentContract.end_date ?? ocrResult.extractedSignals.endDate;
+    const nextRenewalPeriodMonths =
+      currentContract.renewal_period_months ?? ocrResult.extractedSignals.renewalPeriodMonths;
+    const nextEndDate =
+      currentContract.end_date ??
+      ocrResult.extractedSignals.endDate ??
+      addMonthsToIsoDate(nextStartDate ?? undefined, nextRenewalPeriodMonths ?? undefined);
     const nextNoticeDays = currentContract.renewal_notice_days ?? ocrResult.extractedSignals.renewalNoticeDays;
     const nextNoticeDeadline =
       currentContract.notice_deadline ?? calculateNoticeDeadline(nextEndDate, nextNoticeDays);
@@ -728,8 +1112,7 @@ Deno.serve(async (req) => {
         end_date: nextEndDate,
         renewal_type: nextRenewalType,
         renewal_notice_days: nextNoticeDays,
-        renewal_period_months:
-          currentContract.renewal_period_months ?? ocrResult.extractedSignals.renewalPeriodMonths,
+        renewal_period_months: nextRenewalPeriodMonths,
         notice_deadline: nextNoticeDeadline,
       })
       .eq("id", currentContract.id);

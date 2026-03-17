@@ -122,12 +122,14 @@ export function useTeams() {
         if (!user) return { success: false, error: "Not authenticated" };
 
         try {
-            // Create the team
-            const { data: team, error: teamError } = await supabase
+            // Avoid `insert().select()` here: the teams SELECT policy only allows
+            // reading teams once the user is already a member.
+            const teamId = crypto.randomUUID();
+            const now = new Date().toISOString();
+
+            const { error: teamError } = await supabase
                 .from("teams")
-                .insert({ name, description, color })
-                .select()
-                .single();
+                .insert({ id: teamId, name, description, color });
 
             if (teamError) throw teamError;
 
@@ -135,7 +137,7 @@ export function useTeams() {
             const { error: memberError } = await supabase
                 .from("team_members")
                 .insert({
-                    team_id: team.id,
+                    team_id: teamId,
                     user_id: user.id,
                     role: "lead",
                 });
@@ -145,7 +147,17 @@ export function useTeams() {
             // Refresh teams list
             await fetchTeams();
 
-            return { success: true, team };
+            return {
+                success: true,
+                team: {
+                    id: teamId,
+                    name,
+                    description,
+                    color,
+                    created_at: now,
+                    updated_at: now,
+                },
+            };
         } catch (err: any) {
             console.error("Error creating team:", err);
             return { success: false, error: err.message };

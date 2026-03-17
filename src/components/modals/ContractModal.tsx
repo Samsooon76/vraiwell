@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from "react";
 import {
   Dialog,
   DialogContent,
@@ -13,11 +13,12 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import type { Team } from "@/hooks/useTeams";
 import {
   CONTRACT_RENEWAL_OPTIONS,
   CONTRACT_STATUS_OPTIONS,
   DEFAULT_OCR_MODEL,
-  TERMS_STATUS_OPTIONS,
+  deriveContractEndDate,
   getHumanFileSize,
   toDateInputValue,
 } from "@/lib/contracts";
@@ -31,25 +32,29 @@ import {
   PreparedContractFileResult,
   UploadedContractFile,
 } from "@/types/contracts";
-import { AlertTriangle, FileUp, Loader2, Sparkles } from "lucide-react";
+import { AlertTriangle, Check, FileSearch, FileUp, Globe, Loader2, Sparkles } from "lucide-react";
+
+const TERMS_SCAN_STEP_DURATION_MS = 10000;
+const NO_TEAM_VALUE = "__no_team__";
 
 interface ContractModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   mode: "create" | "edit";
   contract?: Contract | null;
+  teams: Team[];
+  isTeamsLoading?: boolean;
   onSubmit: (input: ContractUpsertInput) => Promise<boolean>;
   onPrepareFile: (file: File) => Promise<PreparedContractFileResult | null>;
   onRemoveUploadedFile: (path: string) => Promise<void>;
-  onRunTermsScan?: (contractId: string) => Promise<boolean>;
-  autoStartTermsScan?: boolean;
-  onAutoStartTermsConsumed?: () => void;
+  isTermsScanInProgress?: boolean;
 }
 
 interface ContractFormState {
   contractLabel: string;
   toolName: string;
   vendorName: string;
+  teamId: string;
   status: ContractStatus;
   sourceUrl: string;
   startDate: string;
@@ -68,6 +73,7 @@ function getInitialFormState(contract?: Contract | null): ContractFormState {
     contractLabel: contract?.contract_label ?? "",
     toolName: contract?.tool_name ?? "",
     vendorName: contract?.vendor_name ?? "",
+    teamId: contract?.team_id ?? "",
     status: contract?.status ?? "active",
     sourceUrl: contract?.source_url ?? "",
     startDate: toDateInputValue(contract?.start_date),
@@ -95,27 +101,47 @@ function deriveContractLabel(fileName: string) {
   return fileName.replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ").trim();
 }
 
+function resolveDetectedEndDate(
+  detectedEndDate: string | null | undefined,
+  detectedStartDate: string | null | undefined,
+  detectedRenewalPeriodMonths: number | null | undefined,
+  currentEndDate: string,
+) {
+  if (detectedEndDate) {
+    return detectedEndDate;
+  }
+
+  if (currentEndDate) {
+    return currentEndDate;
+  }
+
+  return deriveContractEndDate(detectedStartDate, detectedRenewalPeriodMonths) ?? currentEndDate;
+}
+
 export function ContractModal({
   open,
   onOpenChange,
   mode,
   contract,
+  teams,
+  isTeamsLoading = false,
   onSubmit,
   onPrepareFile,
   onRemoveUploadedFile,
-  onRunTermsScan,
-  autoStartTermsScan = false,
-  onAutoStartTermsConsumed,
+  isTermsScanInProgress = false,
 }: ContractModalProps) {
   const [form, setForm] = useState<ContractFormState>(getInitialFormState(contract));
   const [uploadedFile, setUploadedFile] = useState<UploadedContractFile | null>(null);
   const [ocrPreview, setOcrPreview] = useState<ContractOcrPreview | null>(null);
   const [ocrError, setOcrError] = useState<string | null>(null);
   const [isPreparing, setIsPreparing] = useState(false);
-  const [isScanningTerms, setIsScanningTerms] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [termsScanStepIndex, setTermsScanStepIndex] = useState(0);
   const [fileInputKey, setFileInputKey] = useState(0);
   const preserveUploadedFileRef = useRef(false);
+  const isTermsScanActive = isTermsScanInProgress;
+  const showTermsResult = mode === "edit" && !isTermsScanActive && form.termsStatus === "completed";
+  const showTermsFailure = mode === "edit" && !isTermsScanActive && form.termsStatus === "failed";
 
   const currentFileLabel = useMemo(() => {
     if (uploadedFile) {
@@ -131,6 +157,17 @@ export function ContractModal({
     return size ? `${contract.file_name} (${size})` : contract.file_name;
   }, [contract?.file_name, contract?.file_size, uploadedFile]);
 
+  const termsDebugLines = useMemo(() => {
+    if (form.termsStatus !== "failed") {
+      return [];
+    }
+
+    return (form.termsSummary ?? "")
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean);
+  }, [form.termsStatus, form.termsSummary]);
+
   useEffect(() => {
     if (!open) {
       return;
@@ -141,11 +178,41 @@ export function ContractModal({
     setOcrPreview(null);
     setOcrError(null);
     setIsPreparing(false);
-    setIsScanningTerms(false);
     setIsSubmitting(false);
+    setTermsScanStepIndex(0);
     setFileInputKey((current) => current + 1);
     preserveUploadedFileRef.current = false;
   }, [contract, open]);
+
+  useEffect(() => {
+    if (!open || mode !== "edit" || !contract) {
+      return;
+    }
+
+    setForm((current) => ({
+      ...current,
+      teamId: contract?.team_id ?? current.teamId,
+      termsStatus: contract.terms_status ?? current.termsStatus,
+      sourceUrl: contract.source_url ?? current.sourceUrl,
+      termsUrl: contract.terms_url ?? current.termsUrl,
+      termsSummary: contract.terms_summary ?? current.termsSummary,
+      renewalType: contract.renewal_type ?? current.renewalType,
+      renewalPeriodMonths: contract.renewal_period_months?.toString() ?? current.renewalPeriodMonths,
+      renewalNoticeDays: contract.renewal_notice_days?.toString() ?? current.renewalNoticeDays,
+    }));
+  }, [
+    contract?.renewal_notice_days,
+    contract?.renewal_period_months,
+    contract?.renewal_type,
+    contract?.source_url,
+    contract?.team_id,
+    contract?.terms_status,
+    contract?.terms_summary,
+    contract?.terms_url,
+    contract,
+    mode,
+    open,
+  ]);
 
   const setValue = <K extends keyof ContractFormState>(key: K, value: ContractFormState[K]) => {
     setForm((current) => ({ ...current, [key]: value }));
@@ -161,19 +228,22 @@ export function ContractModal({
       toolName: preview?.extractedSignals.toolName ?? current.toolName,
       vendorName: preview?.extractedSignals.vendorName ?? current.vendorName,
       startDate: preview?.extractedSignals.startDate ?? current.startDate,
-      endDate: preview?.extractedSignals.endDate ?? current.endDate,
+      endDate: resolveDetectedEndDate(
+        preview?.extractedSignals.endDate,
+        preview?.extractedSignals.startDate ?? current.startDate,
+        preview?.extractedSignals.renewalPeriodMonths,
+        current.endDate,
+      ),
       renewalType:
         preview?.extractedSignals.renewalType && preview.extractedSignals.renewalType !== "none"
           ? preview.extractedSignals.renewalType
           : current.renewalType,
       renewalPeriodMonths:
-        mode === "edit" &&
         preview?.extractedSignals.renewalPeriodMonths !== null &&
         preview?.extractedSignals.renewalPeriodMonths !== undefined
           ? String(preview.extractedSignals.renewalPeriodMonths)
           : current.renewalPeriodMonths,
       renewalNoticeDays:
-        mode === "edit" &&
         preview?.extractedSignals.renewalNoticeDays !== null &&
         preview?.extractedSignals.renewalNoticeDays !== undefined
           ? String(preview.extractedSignals.renewalNoticeDays)
@@ -191,8 +261,8 @@ export function ContractModal({
       setOcrPreview(null);
       setOcrError(null);
       setIsPreparing(false);
-      setIsScanningTerms(false);
       setIsSubmitting(false);
+      setTermsScanStepIndex(0);
       setFileInputKey((current) => current + 1);
       preserveUploadedFileRef.current = false;
       onOpenChange(false);
@@ -246,13 +316,14 @@ export function ContractModal({
       contract_label: form.contractLabel,
       tool_name: form.toolName,
       vendor_name: form.vendorName,
+      team_id: form.teamId || null,
       status: form.status,
       source_url: form.sourceUrl,
       start_date: form.startDate || null,
-      end_date: form.endDate || null,
+      end_date: form.endDate || deriveContractEndDate(form.startDate, parseOptionalInteger(form.renewalPeriodMonths)),
       renewal_type: form.renewalType,
-      renewal_period_months: mode === "edit" ? parseOptionalInteger(form.renewalPeriodMonths) : null,
-      renewal_notice_days: mode === "edit" ? parseOptionalInteger(form.renewalNoticeDays) : null,
+      renewal_period_months: parseOptionalInteger(form.renewalPeriodMonths),
+      renewal_notice_days: parseOptionalInteger(form.renewalNoticeDays),
       ocr_model: DEFAULT_OCR_MODEL,
       ocr_status: uploadedFile ? (ocrPreview ? "completed" : "failed") : contract?.ocr_status ?? "queued",
       ocr_extracted_text: ocrPreview?.markdownText ?? null,
@@ -272,49 +343,36 @@ export function ContractModal({
     }
   };
 
-  const handleTermsScan = useCallback(async () => {
-    if (mode !== "edit" || !contract?.id || !onRunTermsScan || isScanningTerms) {
+  useEffect(() => {
+    if (!open || mode !== "edit") {
       return;
     }
 
-    setIsScanningTerms(true);
-    setForm((current) => ({ ...current, termsStatus: "reviewing" }));
-
-    const success = await onRunTermsScan(contract.id);
-
-    if (!success) {
-      setForm((current) => ({
-        ...current,
-        termsStatus: contract.terms_status ?? current.termsStatus,
-      }));
+    if (isTermsScanInProgress) {
+      setTermsScanStepIndex(0);
+      setForm((current) => ({ ...current, termsStatus: "reviewing" }));
     }
-
-    setIsScanningTerms(false);
-  }, [contract?.id, contract?.terms_status, isScanningTerms, mode, onRunTermsScan]);
+  }, [isTermsScanInProgress, mode, open]);
 
   useEffect(() => {
-    if (
-      mode !== "edit" ||
-      !open ||
-      !contract?.id ||
-      !onRunTermsScan ||
-      !autoStartTermsScan ||
-      isScanningTerms
-    ) {
+    if (!isTermsScanActive) {
       return;
     }
 
-    onAutoStartTermsConsumed?.();
-    void handleTermsScan();
-  }, [autoStartTermsScan, contract?.id, handleTermsScan, isScanningTerms, mode, onAutoStartTermsConsumed, onRunTermsScan, open]);
+    const interval = window.setInterval(() => {
+      setTermsScanStepIndex((current) => Math.min(current + 1, 2));
+    }, TERMS_SCAN_STEP_DURATION_MS);
+
+    return () => window.clearInterval(interval);
+  }, [isTermsScanActive]);
 
   const renderUploadStep = () => (
     <div className="space-y-6">
       <Alert className="border-primary/20 bg-primary/5">
         <Sparkles className="h-4 w-4 text-primary" />
-        <AlertTitle>Upload d'abord, detection ensuite</AlertTitle>
+        <AlertTitle>Analyse automatique du document</AlertTitle>
         <AlertDescription>
-          Ajoute le fichier du contrat. L'OCR Mistral analyse le document puis pre-remplit les champs detectes.
+          Ajoute le fichier du contrat pour detecter automatiquement les dates et informations utiles.
         </AlertDescription>
       </Alert>
 
@@ -353,6 +411,17 @@ export function ContractModal({
   );
 
   const shouldShowForm = mode === "edit" || !!uploadedFile;
+  const termsScanSteps = [
+    { label: "Recherche des sites officiels", icon: Globe },
+    { label: "Extraction des donnees juridiques", icon: FileSearch },
+    { label: "Mise en forme des informations", icon: Sparkles },
+  ];
+  const termsResultItems = [
+    form.sourceUrl ? { label: "Site officiel", value: form.sourceUrl } : null,
+    form.termsUrl ? { label: "Page CGV / CGU", value: form.termsUrl } : null,
+    form.renewalPeriodMonths ? { label: "Reconduction", value: `${form.renewalPeriodMonths} mois` } : null,
+    form.renewalNoticeDays ? { label: "Preavis", value: `${form.renewalNoticeDays} jours` } : null,
+  ].filter((item): item is { label: string; value: string } => Boolean(item));
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
@@ -363,8 +432,8 @@ export function ContractModal({
           </DialogTitle>
           <DialogDescription>
             {mode === "create"
-              ? "Etape 1 sur 2. Scanne le document et valide les informations du contrat. L'etape 2 CGV / CGU s'ouvrira juste apres l'enregistrement."
-              : "Etape 2. Mets a jour le contrat, ou lance l'extraction CGV / CGU pour trouver les sources web."}
+              ? "Ajoute un document pour pre-remplir automatiquement les informations detectees."
+              : "Mets a jour le contrat et verifie les informations detectees."}
           </DialogDescription>
         </DialogHeader>
 
@@ -416,35 +485,113 @@ export function ContractModal({
               </Alert>
             )}
 
-            {mode === "edit" && contract?.id && onRunTermsScan && (
+            {mode === "edit" && isTermsScanActive && (
               <div className="rounded-xl border border-primary/20 bg-primary/5 p-4">
-                <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-                  <div>
-                    <p className="text-sm font-medium text-foreground">Etape 2: extraction CGV / CGU</p>
+                <div className="flex items-start gap-3">
+                  <Loader2 className="mt-0.5 h-4 w-4 animate-spin text-primary" />
+                  <div className="flex-1">
+                    <p className="text-sm font-medium text-foreground">Extraction CGV / CGU en cours</p>
                     <p className="mt-1 text-sm text-muted-foreground">
-                      Lance la recherche web pour trouver le site officiel, la bonne page juridique et remplir
-                      automatiquement les URL et le resume.
+                      La recherche se lance automatiquement apres la sauvegarde du contrat.
                     </p>
                   </div>
+                </div>
 
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={handleTermsScan}
-                    disabled={isScanningTerms || form.termsStatus === "reviewing"}
-                  >
-                    {(isScanningTerms || form.termsStatus === "reviewing") && (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    )}
-                    {isScanningTerms || form.termsStatus === "reviewing"
-                      ? "Recherche CGV en cours"
-                      : "Extraire CGV / CGU"}
-                  </Button>
+                <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                  {termsScanSteps.map((step, index) => {
+                    const Icon = step.icon;
+                    const isCompleted = index < termsScanStepIndex;
+                    const isCurrent = index === termsScanStepIndex;
+
+                    return (
+                      <div
+                        key={step.label}
+                        className={`rounded-lg border px-3 py-3 text-sm transition-colors ${
+                          isCurrent
+                            ? "border-primary/40 bg-background text-foreground"
+                            : isCompleted
+                              ? "border-primary/20 bg-background/80 text-foreground"
+                              : "border-border/60 bg-background/40 text-muted-foreground"
+                        }`}
+                      >
+                        <div className="flex items-center gap-2">
+                          {isCompleted ? (
+                            <Check className="h-4 w-4 text-primary" />
+                          ) : isCurrent ? (
+                            <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                          ) : (
+                            <Icon className="h-4 w-4" />
+                          )}
+                          <span className={isCurrent ? "animate-pulse" : ""}>{step.label}</span>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             )}
 
-            <div className="grid gap-4 sm:grid-cols-2">
+            {showTermsResult && (
+              <div className="rounded-xl border border-success/20 bg-success/5 p-4">
+                <div className="flex items-start gap-3">
+                  <Check className="mt-0.5 h-4 w-4 text-success" />
+                  <div className="flex-1">
+                    <p className="text-sm font-medium text-foreground">Extraction CGV / CGU terminee</p>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      Les informations juridiques detectees ont ete ajoutees au contrat.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                  {termsScanSteps.map((step) => (
+                    <div
+                      key={step.label}
+                      className="rounded-lg border border-success/20 bg-background/90 px-3 py-3 text-sm text-foreground"
+                    >
+                      <div className="flex items-center gap-2">
+                        <Check className="h-4 w-4 text-success" />
+                        <span>{step.label}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {termsResultItems.length > 0 && (
+                  <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                    {termsResultItems.map((item) => (
+                      <div key={item.label} className="rounded-lg border border-border/70 bg-background/80 p-3">
+                        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{item.label}</p>
+                        <p className="mt-1 break-all text-sm text-foreground">{item.value}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {showTermsFailure && (
+              <Alert className="border-warning/30 bg-warning/5">
+                <AlertTriangle className="h-4 w-4 text-warning" />
+                <AlertTitle>Extraction CGV / CGU incomplete</AlertTitle>
+                <AlertDescription>
+                  Aucune page juridique suffisamment fiable n'a ete confirmee automatiquement. Verifie les URL et les
+                  donnees detectees avant validation.
+                  {termsDebugLines.length > 0 && (
+                    <div className="mt-4 rounded-lg border border-warning/20 bg-background/80 p-3">
+                      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Debug</p>
+                      <div className="mt-2 space-y-1 text-sm text-foreground">
+                        {termsDebugLines.map((line) => (
+                          <p key={line}>{line}</p>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </AlertDescription>
+              </Alert>
+            )}
+
+            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
               <div className="space-y-2">
                 <Label htmlFor="contractLabel">Nom du contrat</Label>
                 <Input
@@ -487,6 +634,27 @@ export function ContractModal({
                     {CONTRACT_STATUS_OPTIONS.map((option) => (
                       <SelectItem key={option.value} value={option.value}>
                         {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Equipe rattachee</Label>
+                <Select
+                  value={form.teamId || NO_TEAM_VALUE}
+                  onValueChange={(value) => setValue("teamId", value === NO_TEAM_VALUE ? "" : value)}
+                  disabled={isTeamsLoading}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Choisir une equipe" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={NO_TEAM_VALUE}>Sans equipe</SelectItem>
+                    {teams.map((team) => (
+                      <SelectItem key={team.id} value={team.id}>
+                        {team.name}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -557,33 +725,15 @@ export function ContractModal({
             </div>
 
             {mode === "edit" && (
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div className="space-y-2">
-                  <Label>Statut recherche CGV / CGU</Label>
-                  <Select value={form.termsStatus} onValueChange={(value: ContractTermsStatus) => setValue("termsStatus", value)}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Choisir" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {TERMS_STATUS_OPTIONS.map((option) => (
-                        <SelectItem key={option.value} value={option.value}>
-                          {option.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="termsSummary">Resume CGV / CGU</Label>
-                  <Textarea
-                    id="termsSummary"
-                    rows={3}
-                    placeholder="Ex: reconduction tacite annuelle, resiliation 60 jours avant echeance..."
-                    value={form.termsSummary}
-                    onChange={(event) => setValue("termsSummary", event.target.value)}
-                  />
-                </div>
+              <div className="space-y-2">
+                <Label htmlFor="termsSummary">Synthese CGV / CGU et points de vigilance</Label>
+                <Textarea
+                  id="termsSummary"
+                  rows={4}
+                  placeholder="Ex: reconduction tacite annuelle, resiliation 30 jours avant echeance, attention a l'absence de remboursement..."
+                  value={form.termsSummary}
+                  onChange={(event) => setValue("termsSummary", event.target.value)}
+                />
               </div>
             )}
 
@@ -610,12 +760,6 @@ export function ContractModal({
                     onChange={(event) => setValue("renewalNoticeDays", event.target.value)}
                   />
                 </div>
-              </div>
-            )}
-
-            {mode === "create" && (
-              <div className="rounded-xl border border-dashed border-border bg-muted/30 p-4 text-sm text-muted-foreground">
-                Etape 2 se lancera juste apres la sauvegarde dans cette meme sequence, avec recherche du site officiel, de la bonne page juridique et remplissage des URL.
               </div>
             )}
 

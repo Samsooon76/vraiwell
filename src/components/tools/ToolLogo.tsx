@@ -190,6 +190,15 @@ const ToolSvgLogos: Record<string, (size: number) => React.ReactNode> = {
       <path fill="white" d="M7 6h2v9h5v2H7V6z"/>
     </svg>
   ),
+  "onoff business": (size) => (
+    <svg viewBox="0 0 24 24" width={size} height={size}>
+      <rect fill="#FF6B35" width="24" height="24" rx="6" />
+      <path
+        fill="white"
+        d="M12 5.5c3.59 0 6.5 2.91 6.5 6.5s-2.91 6.5-6.5 6.5S5.5 15.59 5.5 12 8.41 5.5 12 5.5zm0 2.2A4.3 4.3 0 1 0 12 16.3 4.3 4.3 0 0 0 12 7.7z"
+      />
+    </svg>
+  ),
 };
 
 // Fallback colors for tools without SVG logos
@@ -223,6 +232,7 @@ const toolColors: Record<string, { bg: string; text: string }> = {
   loom: { bg: "#625df5", text: "white" },
   calendly: { bg: "#006bff", text: "white" },
   lucca: { bg: "#ff6b35", text: "white" },
+  "onoff business": { bg: "#ff6b35", text: "white" },
 };
 
 export function ToolLogo({ name, size = "md", className }: ToolLogoProps) {

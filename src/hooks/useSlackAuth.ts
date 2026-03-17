@@ -1,7 +1,11 @@
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
+import {
+    emitIntegrationConnectionChanged,
+    subscribeIntegrationConnectionChanges,
+} from "@/lib/integration-events";
 
 export const SLACK_TOKEN_KEY = "slack_provider_token";
 
@@ -38,20 +42,36 @@ export function useSlackAuth() {
     // Simplified hasToken check for UI state
     const [hasToken, setHasToken] = useState(false);
 
-    useEffect(() => {
-        const checkToken = async () => {
-            const { data: { user } } = await supabase.auth.getUser();
-            if (user) {
-                const { data } = await supabase
-                    .from("profiles")
-                    .select("slack_token")
-                    .eq("user_id", user.id)
-                    .single();
-                setHasToken(!!data?.slack_token);
-            }
-        };
-        checkToken();
+    const refreshSlackConnection = useCallback(async () => {
+        const { data: { user } } = await supabase.auth.getUser();
+
+        if (!user) {
+            setHasToken(false);
+            return false;
+        }
+
+        const { data } = await supabase
+            .from("profiles")
+            .select("slack_token")
+            .eq("user_id", user.id)
+            .single();
+
+        const nextHasToken = !!data?.slack_token;
+        setHasToken(nextHasToken);
+        return nextHasToken;
     }, []);
+
+    useEffect(() => {
+        void refreshSlackConnection();
+
+        const unsubscribeConnectionChanges = subscribeIntegrationConnectionChanges("slack", () => {
+            void refreshSlackConnection();
+        });
+
+        return () => {
+            unsubscribeConnectionChanges();
+        };
+    }, [refreshSlackConnection]);
 
     const connectSlack = async (clientId: string) => {
         setIsConnecting(true);
@@ -91,6 +111,7 @@ export function useSlackAuth() {
                 }
 
                 setHasToken(true);
+                emitIntegrationConnectionChanged("slack");
                 setSlackUsers([]); // Force refresh state
                 toast.success("Slack connecté avec succès !");
 
@@ -131,6 +152,8 @@ export function useSlackAuth() {
                     .eq("user_id", user.id);
             }
 
+            setHasToken(true);
+            emitIntegrationConnectionChanged("slack");
             setSlackUsers(data.users || []);
             if (data.workspaceName) {
                 setWorkspaceInfo({
@@ -158,8 +181,10 @@ export function useSlackAuth() {
                     .update({ slack_token: null })
                     .eq("user_id", user.id);
             }
+            setHasToken(false);
             setSlackUsers([]);
             setWorkspaceInfo(null);
+            emitIntegrationConnectionChanged("slack");
             return { success: true };
         } catch (err: any) {
             return { success: false, error: err.message };

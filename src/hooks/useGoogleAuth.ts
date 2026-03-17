@@ -1,5 +1,9 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import {
+  emitIntegrationConnectionChanged,
+  subscribeIntegrationConnectionChanges,
+} from "@/lib/integration-events";
 
 export interface GoogleUserLicense {
   skuId: string;
@@ -35,6 +39,75 @@ export interface CreateGoogleUserResult {
 const PROVIDER_TOKEN_KEY = "google_provider_token";
 
 const GOOGLE_DISABLED_KEY = "google_workspace_disabled";
+const GOOGLE_WORKSPACE_CACHE_KEY = "wellcom_google_workspace_cache_v1";
+const GOOGLE_WORKSPACE_CACHE_TTL_MS = 5 * 60 * 1000;
+
+interface GoogleWorkspaceCache {
+  fetchedAt: number;
+  licenseInfo: LicenseInfo | null;
+  userId: string;
+  users: GoogleUser[];
+}
+
+let googleWorkspaceMemoryCache: GoogleWorkspaceCache | null = null;
+
+function readGoogleWorkspaceCache(userId: string, maxAgeMs = GOOGLE_WORKSPACE_CACHE_TTL_MS) {
+  const now = Date.now();
+  const isFreshEnough = (cache: GoogleWorkspaceCache | null) => (
+    !!cache
+    && cache.userId === userId
+    && now - cache.fetchedAt <= maxAgeMs
+  );
+
+  if (isFreshEnough(googleWorkspaceMemoryCache)) {
+    return googleWorkspaceMemoryCache;
+  }
+
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  const rawCache = window.sessionStorage.getItem(GOOGLE_WORKSPACE_CACHE_KEY);
+  if (!rawCache) {
+    return null;
+  }
+
+  try {
+    const parsedCache = JSON.parse(rawCache) as GoogleWorkspaceCache;
+    if (isFreshEnough(parsedCache)) {
+      googleWorkspaceMemoryCache = parsedCache;
+      return parsedCache;
+    }
+  } catch {
+    window.sessionStorage.removeItem(GOOGLE_WORKSPACE_CACHE_KEY);
+  }
+
+  return null;
+}
+
+function writeGoogleWorkspaceCache(cache: GoogleWorkspaceCache) {
+  googleWorkspaceMemoryCache = cache;
+
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  window.sessionStorage.setItem(GOOGLE_WORKSPACE_CACHE_KEY, JSON.stringify(cache));
+}
+
+function clearGoogleWorkspaceCache() {
+  googleWorkspaceMemoryCache = null;
+
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  window.sessionStorage.removeItem(GOOGLE_WORKSPACE_CACHE_KEY);
+}
+
+function getErrorMessage(error: unknown, fallback: string) {
+  return error instanceof Error ? error.message : fallback;
+}
 
 export function useGoogleAuth() {
   const [isConnecting, setIsConnecting] = useState(false);
@@ -45,6 +118,61 @@ export function useGoogleAuth() {
   const [isDisconnecting, setIsDisconnecting] = useState(false);
   const [isCreatingUser, setIsCreatingUser] = useState(false);
   const [isDeletingUser, setIsDeletingUser] = useState(false);
+  const [isConnected, setIsConnected] = useState(false);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const hydrateGoogleWorkspaceCache = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user || !isMounted) {
+        return;
+      }
+
+      const cachedWorkspace = readGoogleWorkspaceCache(user.id);
+      if (!cachedWorkspace) {
+        return;
+      }
+
+      setGoogleUsers(cachedWorkspace.users);
+      setLicenseInfo(cachedWorkspace.licenseInfo);
+    };
+
+    void hydrateGoogleWorkspaceCache();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  const refreshGoogleConnection = useCallback(async () => {
+    const { data: { user } } = await supabase.auth.getUser();
+
+    if (!user) {
+      setIsConnected(false);
+      setGoogleUsers([]);
+      setLicenseInfo(null);
+      clearGoogleWorkspaceCache();
+      return false;
+    }
+
+    const disabledForUser = localStorage.getItem(GOOGLE_DISABLED_KEY);
+    if (disabledForUser === user.id) {
+      setIsConnected(false);
+      return false;
+    }
+
+    const googleIdentity = user.identities?.find(
+      (identity) => identity.provider === "google"
+    );
+
+    const { data: { session } } = await supabase.auth.getSession();
+    const providerToken = session?.provider_token || sessionStorage.getItem(PROVIDER_TOKEN_KEY);
+    const nextIsConnected = !!googleIdentity || !!providerToken;
+
+    setIsConnected(nextIsConnected);
+    return nextIsConnected;
+  }, []);
 
   // Listen for auth changes and save provider_token when available
   useEffect(() => {
@@ -53,10 +181,25 @@ export function useGoogleAuth() {
         // Save the provider_token for later use
         sessionStorage.setItem(PROVIDER_TOKEN_KEY, session.provider_token);
       }
+
+      if (event === "SIGNED_OUT") {
+        sessionStorage.removeItem(PROVIDER_TOKEN_KEY);
+      }
+
+      void refreshGoogleConnection();
     });
 
-    return () => subscription.unsubscribe();
-  }, []);
+    void refreshGoogleConnection();
+
+    const unsubscribeConnectionChanges = subscribeIntegrationConnectionChanges("google", () => {
+      void refreshGoogleConnection();
+    });
+
+    return () => {
+      subscription.unsubscribe();
+      unsubscribeConnectionChanges();
+    };
+  }, [refreshGoogleConnection]);
 
   const connectGoogle = async (redirectPath?: string) => {
     setIsConnecting(true);
@@ -78,8 +221,8 @@ export function useGoogleAuth() {
       });
 
       if (error) throw error;
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError(getErrorMessage(err, "Erreur de connexion Google"));
       setIsConnecting(false);
     }
   };
@@ -113,18 +256,24 @@ export function useGoogleAuth() {
         }
       }
 
+      sessionStorage.removeItem(PROVIDER_TOKEN_KEY);
+      setIsConnected(false);
       setGoogleUsers([]);
+      setLicenseInfo(null);
+      clearGoogleWorkspaceCache();
+      emitIntegrationConnectionChanged("google");
       return { success: true };
-    } catch (err: any) {
-      setError(err.message);
-      return { error: err.message };
+    } catch (err: unknown) {
+      const message = getErrorMessage(err, "Erreur lors de la déconnexion Google");
+      setError(message);
+      return { error: message };
     } finally {
       setIsDisconnecting(false);
     }
   };
 
-  const fetchGoogleUsers = async () => {
-    setIsLoadingUsers(true);
+  const fetchGoogleUsers = useCallback(async (options?: { force?: boolean; maxAgeMs?: number }) => {
+    const { force = false, maxAgeMs = GOOGLE_WORKSPACE_CACHE_TTL_MS } = options ?? {};
     setError(null);
 
     try {
@@ -133,6 +282,29 @@ export function useGoogleAuth() {
       if (!session) {
         throw new Error("No active session");
       }
+
+      const currentUserId = session.user.id;
+
+      if (!force) {
+        const freshCache = readGoogleWorkspaceCache(currentUserId, maxAgeMs);
+        if (freshCache) {
+          setGoogleUsers(freshCache.users);
+          setLicenseInfo(freshCache.licenseInfo);
+          return {
+            users: freshCache.users,
+            licenseInfo: freshCache.licenseInfo,
+            cached: true,
+          };
+        }
+
+        const staleCache = readGoogleWorkspaceCache(currentUserId, Number.POSITIVE_INFINITY);
+        if (staleCache) {
+          setGoogleUsers(staleCache.users);
+          setLicenseInfo(staleCache.licenseInfo);
+        }
+      }
+
+      setIsLoadingUsers(true);
 
       // Get the provider_token from session or sessionStorage
       let providerToken = session.provider_token;
@@ -164,32 +336,23 @@ export function useGoogleAuth() {
 
       setGoogleUsers(data.users || []);
       setLicenseInfo(data.licenseInfo || null);
+      writeGoogleWorkspaceCache({
+        fetchedAt: Date.now(),
+        licenseInfo: data.licenseInfo || null,
+        userId: currentUserId,
+        users: data.users || [],
+      });
       return data;
-    } catch (err: any) {
-      setError(err.message);
-      return { error: err.message };
+    } catch (err: unknown) {
+      const message = getErrorMessage(err, "Erreur lors du chargement des utilisateurs Google");
+      setError(message);
+      return { error: message };
     } finally {
       setIsLoadingUsers(false);
     }
-  };
+  }, []);
 
-  const checkGoogleConnection = async () => {
-    const { data: { user } } = await supabase.auth.getUser();
-
-    if (!user) return false;
-
-    // Check if user manually disabled the integration
-    const disabledForUser = localStorage.getItem(GOOGLE_DISABLED_KEY);
-    if (disabledForUser === user.id) {
-      return false;
-    }
-
-    const googleIdentity = user.identities?.find(
-      (identity) => identity.provider === "google"
-    );
-
-    return !!googleIdentity;
-  };
+  const checkGoogleConnection = useCallback(async () => refreshGoogleConnection(), [refreshGoogleConnection]);
 
   const createGoogleUser = async (
     firstName: string,
@@ -240,16 +403,17 @@ export function useGoogleAuth() {
       }
 
       // Refresh user list
-      await fetchGoogleUsers();
+      await fetchGoogleUsers({ force: true });
 
       return {
         success: true,
         user: data.user,
         invitationSentTo: data.invitationSentTo,
       };
-    } catch (err: any) {
-      setError(err.message);
-      return { success: false, error: err.message };
+    } catch (err: unknown) {
+      const message = getErrorMessage(err, "Erreur lors de la creation de l'utilisateur Google");
+      setError(message);
+      return { success: false, error: message };
     } finally {
       setIsCreatingUser(false);
     }
@@ -297,13 +461,13 @@ export function useGoogleAuth() {
         throw new Error(data.error);
       }
 
-      // Remove user from local state
-      setGoogleUsers(prev => prev.filter(u => u.id !== userId));
+      await fetchGoogleUsers({ force: true });
 
       return { success: true };
-    } catch (err: any) {
-      setError(err.message);
-      return { success: false, error: err.message };
+    } catch (err: unknown) {
+      const message = getErrorMessage(err, "Erreur lors de la suppression de l'utilisateur Google");
+      setError(message);
+      return { success: false, error: message };
     } finally {
       setIsDeletingUser(false);
     }
@@ -318,6 +482,7 @@ export function useGoogleAuth() {
     googleUsers,
     licenseInfo,
     error,
+    isConnected,
     connectGoogle,
     disconnectGoogle,
     fetchGoogleUsers,

@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Check, Search, Lock } from "lucide-react";
 import { useState, useMemo } from "react";
+import { getIntegrationLabel } from "@/config/workflowActions";
 
 interface ActionSelectorProps {
     actions: WorkflowAction[];
@@ -12,21 +13,6 @@ interface ActionSelectorProps {
     selectedAction: WorkflowAction | null;
     onSelect: (action: WorkflowAction) => void;
 }
-
-const integrationLabels: Record<string, string> = {
-    google: "Google Workspace",
-    microsoft: "Microsoft 365",
-    slack: "Slack",
-    notion: "Notion",
-    hubspot: "HubSpot",
-};
-
-const categoryLabels: Record<string, string> = {
-    user_management: "Gestion utilisateurs",
-    communication: "Communication",
-    documentation: "Documentation",
-    crm: "CRM",
-};
 
 export function ActionSelector({
     actions,
@@ -42,7 +28,7 @@ export function ActionSelector({
         const uniqueIntegrations = [...new Set(actions.map(a => a.integration_id))];
         return uniqueIntegrations.map(id => ({
             id,
-            label: integrationLabels[id] || id,
+            label: getIntegrationLabel(id),
             connected: connectedIntegrations[id] || false,
             actionsCount: actions.filter(a => a.integration_id === id).length,
         }));
@@ -59,10 +45,10 @@ export function ActionSelector({
         if (searchQuery) {
             const query = searchQuery.toLowerCase();
             filtered = filtered.filter(
-                a =>
-                    a.name.toLowerCase().includes(query) ||
-                    a.description?.toLowerCase().includes(query) ||
-                    integrationLabels[a.integration_id]?.toLowerCase().includes(query)
+                    a =>
+                        a.name.toLowerCase().includes(query) ||
+                        a.description?.toLowerCase().includes(query) ||
+                        getIntegrationLabel(a.integration_id)?.toLowerCase().includes(query)
             );
         }
 
@@ -128,8 +114,8 @@ export function ActionSelector({
                     return (
                         <div key={integrationId} className="space-y-2">
                             <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
-                                <ToolLogo name={integrationLabels[integrationId]} size="sm" className="h-4 w-4" />
-                                {integrationLabels[integrationId]}
+                                <ToolLogo name={getIntegrationLabel(integrationId)} size="sm" className="h-4 w-4" />
+                                {getIntegrationLabel(integrationId)}
                                 {!isConnected && (
                                     <Badge variant="outline" className="text-xs">Non connecté</Badge>
                                 )}
@@ -156,7 +142,7 @@ export function ActionSelector({
                       `}
                                         >
                                             <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary/10 text-primary">
-                                                <ToolLogo name={integrationLabels[integrationId]} size="sm" className="h-4 w-4" />
+                                                <ToolLogo name={getIntegrationLabel(integrationId)} size="sm" className="h-4 w-4" />
                                             </div>
                                             <div className="flex-1 min-w-0">
                                                 <p className="font-medium text-sm text-foreground truncate">

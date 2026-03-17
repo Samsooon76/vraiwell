@@ -24,6 +24,7 @@ const availableIntegrations = [
   { id: "microsoft", name: "Microsoft 365", category: "Identity" },
   { id: "okta", name: "Okta", category: "Identity" },
   { id: "slack", name: "Slack", category: "Communication" },
+  { id: "onoff", name: "OnOff Business", category: "Téléphonie" },
   { id: "jira", name: "Jira", category: "Projet" },
   { id: "github", name: "GitHub", category: "Développement" },
   { id: "salesforce", name: "Salesforce", category: "CRM" },

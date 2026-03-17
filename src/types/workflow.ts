@@ -10,15 +10,19 @@ export interface WorkflowAction {
     category: string | null;
     input_schema: JSONSchemaType;
     edge_function: string | null;
+    execution_action?: string | null;
     is_active: boolean;
 }
 
 export interface WorkflowStep {
     id: string;
     workflow_id: string;
-    action_id: string;
+    action_id: string | null;
     step_order: number;
     config: Record<string, unknown>;
+    integration_id?: string | null;
+    action_key?: string | null;
+    action_snapshot?: Partial<WorkflowAction> | null;
     action?: WorkflowAction;
 }
 

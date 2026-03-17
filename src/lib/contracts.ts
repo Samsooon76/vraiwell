@@ -1,4 +1,4 @@
-import { differenceInCalendarDays, format, parseISO, startOfDay, subDays } from "date-fns";
+import { addMonths, differenceInCalendarDays, format, parseISO, startOfDay, subDays } from "date-fns";
 import { fr } from "date-fns/locale";
 import {
   Contract,
@@ -85,6 +85,14 @@ export function calculateNoticeDeadline(endDate?: string | null, noticeDays?: nu
   }
 
   return format(subDays(parseISO(endDate), noticeDays), "yyyy-MM-dd");
+}
+
+export function deriveContractEndDate(startDate?: string | null, renewalPeriodMonths?: number | null) {
+  if (!startDate || !renewalPeriodMonths || renewalPeriodMonths <= 0) {
+    return null;
+  }
+
+  return format(addMonths(parseISO(startDate), renewalPeriodMonths), "yyyy-MM-dd");
 }
 
 export function toDateInputValue(value?: string | null) {

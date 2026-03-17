@@ -37,6 +37,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { ExecuteWorkflowModal } from "@/components/modals/ExecuteWorkflowModal";
 import { useWorkflows } from "@/hooks/useWorkflows";
+import { getIntegrationLabel } from "@/config/workflowActions";
 
 const typeConfig = {
   onboarding: { label: "Onboarding", icon: Users, color: "bg-success/10 text-success" },
@@ -44,17 +45,9 @@ const typeConfig = {
   custom: { label: "Personnalisé", icon: Zap, color: "bg-primary/10 text-primary" },
 };
 
-const integrationLabels: Record<string, string> = {
-  google: "Google Workspace",
-  microsoft: "Microsoft 365",
-  slack: "Slack",
-  notion: "Notion",
-  hubspot: "HubSpot",
-};
-
 export default function Workflows() {
   const navigate = useNavigate();
-  const { workflows, isLoading, refetch, deleteWorkflow, toggleWorkflow } = useWorkflows();
+  const { workflows, isLoading, deleteWorkflow, toggleWorkflow } = useWorkflows();
   const [executeModalOpen, setExecuteModalOpen] = useState(false);
   const [selectedWorkflowId, setSelectedWorkflowId] = useState<string | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -200,13 +193,18 @@ export default function Workflows() {
                           <div key={step.id} className="flex items-center gap-2">
                             <div className="flex items-center gap-2 rounded-full bg-muted px-3 py-1.5">
                               <ToolLogo
-                                name={integrationLabels[step.action?.integration_id] || ''}
+                                name={getIntegrationLabel(step.action?.integration_id || '')}
                                 size="sm"
                                 className="h-4 w-4"
                               />
                               <span className="text-xs font-medium text-foreground">
                                 {step.action?.name || 'Action'}
                               </span>
+                              {step.action && !step.action.is_active && (
+                                <Badge variant="outline" className="text-[10px] text-muted-foreground">
+                                  Indisponible
+                                </Badge>
+                              )}
                             </div>
                             {stepIndex < workflow.steps.length - 1 && (
                               <ArrowRight className="h-4 w-4 text-muted-foreground" />

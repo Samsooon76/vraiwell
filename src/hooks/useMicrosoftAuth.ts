@@ -1,5 +1,9 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import {
+  emitIntegrationConnectionChanged,
+  subscribeIntegrationConnectionChanges,
+} from "@/lib/integration-events";
 
 export interface MicrosoftUser {
   id: string;
@@ -40,6 +44,33 @@ export function useMicrosoftAuth() {
   const [isDisconnecting, setIsDisconnecting] = useState(false);
   const [isCreatingUser, setIsCreatingUser] = useState(false);
   const [isDeletingUser, setIsDeletingUser] = useState(false);
+  const [isConnected, setIsConnected] = useState(false);
+
+  const refreshMicrosoftConnection = useCallback(async () => {
+    const { data: { user } } = await supabase.auth.getUser();
+
+    if (!user) {
+      setIsConnected(false);
+      return false;
+    }
+
+    const disabledForUser = localStorage.getItem(MICROSOFT_DISABLED_KEY);
+    if (disabledForUser === user.id) {
+      setIsConnected(false);
+      return false;
+    }
+
+    const microsoftIdentity = user.identities?.find(
+      (identity) => identity.provider === "azure"
+    );
+
+    const { data: { session } } = await supabase.auth.getSession();
+    const providerToken = session?.provider_token || sessionStorage.getItem(PROVIDER_TOKEN_KEY);
+    const nextIsConnected = !!microsoftIdentity || !!providerToken;
+
+    setIsConnected(nextIsConnected);
+    return nextIsConnected;
+  }, []);
 
   // Listen for auth changes and save provider_token when available
   useEffect(() => {
@@ -51,10 +82,25 @@ export function useMicrosoftAuth() {
           sessionStorage.setItem(PROVIDER_TOKEN_KEY, session.provider_token);
         }
       }
+
+      if (event === "SIGNED_OUT") {
+        sessionStorage.removeItem(PROVIDER_TOKEN_KEY);
+      }
+
+      void refreshMicrosoftConnection();
     });
 
-    return () => subscription.unsubscribe();
-  }, []);
+    void refreshMicrosoftConnection();
+
+    const unsubscribeConnectionChanges = subscribeIntegrationConnectionChanges("microsoft", () => {
+      void refreshMicrosoftConnection();
+    });
+
+    return () => {
+      subscription.unsubscribe();
+      unsubscribeConnectionChanges();
+    };
+  }, [refreshMicrosoftConnection]);
 
   const connectMicrosoft = async (redirectPath?: string) => {
     setIsConnecting(true);
@@ -99,8 +145,10 @@ export function useMicrosoftAuth() {
       sessionStorage.removeItem(PROVIDER_TOKEN_KEY);
 
       // Clear state
+      setIsConnected(false);
       setMicrosoftUsers([]);
       setLicenseInfo(null);
+      emitIntegrationConnectionChanged("microsoft");
 
       return { success: true };
     } catch (err: any) {
@@ -163,23 +211,7 @@ export function useMicrosoftAuth() {
     }
   };
 
-  const checkMicrosoftConnection = async () => {
-    const { data: { user } } = await supabase.auth.getUser();
-
-    if (!user) return false;
-
-    // Check if user manually disabled the integration
-    const disabledForUser = localStorage.getItem(MICROSOFT_DISABLED_KEY);
-    if (disabledForUser === user.id) {
-      return false;
-    }
-
-    const microsoftIdentity = user.identities?.find(
-      (identity) => identity.provider === "azure"
-    );
-
-    return !!microsoftIdentity;
-  };
+  const checkMicrosoftConnection = useCallback(async () => refreshMicrosoftConnection(), [refreshMicrosoftConnection]);
 
   const createMicrosoftUser = async (
     firstName: string,
@@ -311,6 +343,7 @@ export function useMicrosoftAuth() {
     microsoftUsers,
     licenseInfo,
     error,
+    isConnected,
     connectMicrosoft,
     disconnectMicrosoft,
     fetchMicrosoftUsers,

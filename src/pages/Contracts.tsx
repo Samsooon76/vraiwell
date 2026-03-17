@@ -1,43 +1,58 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import {
   Clock,
+  Copy,
   ExternalLink,
   FileCheck,
   Loader2,
+  Mail,
   Pencil,
   Plus,
   RefreshCw,
   Repeat,
   Search,
-  Sparkles,
   Trash2,
 } from "lucide-react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { StatsCard } from "@/components/dashboard/StatsCard";
 import { ContractModal } from "@/components/modals/ContractModal";
 import { ConfirmModal } from "@/components/modals/ConfirmModal";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
 import { useContracts } from "@/hooks/useContracts";
+import { useTeams } from "@/hooks/useTeams";
 import {
   formatContractDate,
   getContractStatusBadgeClass,
   getContractStatusLabel,
   getDaysUntil,
-  getOcrStatusBadgeClass,
-  getOcrStatusLabel,
   getRenewalSummary,
   getTermsStatusBadgeClass,
   getTermsStatusLabel,
-  isOcrPending,
-  isTermsPending,
 } from "@/lib/contracts";
 import { Contract } from "@/types/contracts";
+import { toast } from "sonner";
 
-type ContractsFilter = "all" | "expiring" | "ocr" | "terms";
+type ContractsFilter = "all" | "expiring90" | "tacit" | "nonTacit";
+
+const ALL_TEAMS_FILTER_VALUE = "__all_teams__";
+
+function isContractWithinDays(contract: Contract, maxDays: number) {
+  const remainingDays = getDaysUntil(contract.notice_deadline ?? contract.end_date);
+  return remainingDays !== null && remainingDays >= 0 && remainingDays <= maxDays;
+}
 
 export default function Contracts() {
   const {
@@ -50,19 +65,25 @@ export default function Contracts() {
     createContract,
     updateContract,
     deleteContract,
-    runContractOcr,
     runContractTermsScan,
+    generateNonRenewalEmail,
     openContractFile,
   } = useContracts();
+  const { teams, isLoading: isTeamsLoading } = useTeams();
 
   const [searchQuery, setSearchQuery] = useState("");
   const [filter, setFilter] = useState<ContractsFilter>("all");
+  const [teamFilter, setTeamFilter] = useState(ALL_TEAMS_FILTER_VALUE);
   const [createOpen, setCreateOpen] = useState(false);
   const [editingContract, setEditingContract] = useState<Contract | null>(null);
   const [createdContractForFollowup, setCreatedContractForFollowup] = useState<Contract | null>(null);
   const [autoStartTermsContractId, setAutoStartTermsContractId] = useState<string | null>(null);
+  const [activeTermsScanContractId, setActiveTermsScanContractId] = useState<string | null>(null);
   const [contractToDelete, setContractToDelete] = useState<Contract | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [activeEmailGenerationContractId, setActiveEmailGenerationContractId] = useState<string | null>(null);
+  const [emailDraftContract, setEmailDraftContract] = useState<Contract | null>(null);
+  const [emailDraft, setEmailDraft] = useState<{ subject: string; body: string } | null>(null);
 
   useEffect(() => {
     if (!editingContract) {
@@ -91,16 +112,60 @@ export default function Contracts() {
     setCreatedContractForFollowup(null);
   }, [createOpen, createdContractForFollowup]);
 
+  const launchTermsScan = useCallback((contract: Contract, options?: { openModal?: boolean; silent?: boolean }) => {
+    if (options?.openModal) {
+      setEditingContract(contract);
+    }
+
+    setActiveTermsScanContractId(contract.id);
+    void runContractTermsScan(contract.id, { silent: options?.silent }).finally(() => {
+      setActiveTermsScanContractId((current) => (current === contract.id ? null : current));
+    });
+  }, [runContractTermsScan]);
+
+  useEffect(() => {
+    if (!editingContract || autoStartTermsContractId !== editingContract.id) {
+      return;
+    }
+
+    setAutoStartTermsContractId(null);
+    launchTermsScan(editingContract, { silent: true });
+  }, [autoStartTermsContractId, editingContract, launchTermsScan]);
+
+  useEffect(() => {
+    if (!activeTermsScanContractId) {
+      return;
+    }
+
+    const currentContract = contracts.find((contract) => contract.id === activeTermsScanContractId);
+    if (!currentContract) {
+      setActiveTermsScanContractId(null);
+      return;
+    }
+
+    if (currentContract.terms_status !== "reviewing") {
+      setActiveTermsScanContractId(null);
+    }
+  }, [activeTermsScanContractId, contracts]);
+
+  const teamsById = useMemo(
+    () => new Map(teams.map((team) => [team.id, team])),
+    [teams],
+  );
+
   const filteredContracts = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
+    const selectedTeamId = teamFilter === ALL_TEAMS_FILTER_VALUE ? null : teamFilter;
 
     return contracts.filter((contract) => {
+      const teamName = contract.team_id ? teamsById.get(contract.team_id)?.name ?? "" : "";
       const matchesSearch =
         query.length === 0 ||
         [
           contract.contract_label,
           contract.tool_name,
           contract.vendor_name,
+          teamName,
           contract.notes,
           contract.terms_summary,
         ]
@@ -111,32 +176,36 @@ export default function Contracts() {
         return false;
       }
 
-      if (filter === "ocr") {
-        return isOcrPending(contract.ocr_status);
+      if (selectedTeamId && contract.team_id !== selectedTeamId) {
+        return false;
       }
 
-      if (filter === "terms") {
-        return isTermsPending(contract.terms_status);
+      if (filter === "tacit") {
+        return contract.renewal_type === "tacit";
       }
 
-      if (filter === "expiring") {
-        const remainingDays = getDaysUntil(contract.notice_deadline ?? contract.end_date);
-        return remainingDays !== null && remainingDays >= 0 && remainingDays <= 60;
+      if (filter === "nonTacit") {
+        return contract.renewal_type !== "tacit";
+      }
+
+      if (filter === "expiring90") {
+        return isContractWithinDays(contract, 90);
       }
 
       return true;
     });
-  }, [contracts, filter, searchQuery]);
+  }, [contracts, filter, searchQuery, teamFilter, teamsById]);
 
   const expiringSoonCount = useMemo(() => {
-    return contracts.filter((contract) => {
-      const remainingDays = getDaysUntil(contract.notice_deadline ?? contract.end_date);
-      return remainingDays !== null && remainingDays >= 0 && remainingDays <= 60;
-    }).length;
+    return contracts.filter((contract) => isContractWithinDays(contract, 90)).length;
+  }, [contracts]);
+
+  const upcomingActionsCount = useMemo(() => {
+    return contracts.filter((contract) => isContractWithinDays(contract, 30)).length;
   }, [contracts]);
 
   const tacitRenewalCount = contracts.filter((contract) => contract.renewal_type === "tacit").length;
-  const pendingOcrCount = contracts.filter((contract) => isOcrPending(contract.ocr_status)).length;
+  const nonTacitRenewalCount = contracts.filter((contract) => contract.renewal_type !== "tacit").length;
 
   const handleDelete = async () => {
     if (!contractToDelete) {
@@ -151,6 +220,41 @@ export default function Contracts() {
       setContractToDelete(null);
     }
   };
+
+  const handleGenerateEmail = useCallback(async (contract: Contract) => {
+    setActiveEmailGenerationContractId(contract.id);
+    const draft = await generateNonRenewalEmail(contract.id);
+    setActiveEmailGenerationContractId(null);
+
+    if (!draft) {
+      return;
+    }
+
+    setEmailDraftContract(contract);
+    setEmailDraft(draft);
+  }, [generateNonRenewalEmail]);
+
+  const handleCopyDraft = useCallback(async () => {
+    if (!emailDraft) {
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(`Objet : ${emailDraft.subject}\n\n${emailDraft.body}`);
+      toast.success("Mail copie");
+    } catch (error) {
+      console.error("Error copying email draft:", error);
+      toast.error("Impossible de copier le mail");
+    }
+  }, [emailDraft]);
+
+  const mailtoHref = useMemo(() => {
+    if (!emailDraft) {
+      return null;
+    }
+
+    return `mailto:?subject=${encodeURIComponent(emailDraft.subject)}&body=${encodeURIComponent(emailDraft.body)}`;
+  }, [emailDraft]);
 
   return (
     <DashboardLayout>
@@ -193,7 +297,7 @@ export default function Contracts() {
             variant="primary"
           />
           <StatsCard
-            title="Echeances < 60 j"
+            title="Echeances < 90 j"
             value={expiringSoonCount}
             subtitle="preavis ou fin de contrat"
             icon={Clock}
@@ -207,29 +311,13 @@ export default function Contracts() {
             variant="success"
           />
           <StatsCard
-            title="OCR en attente"
-            value={pendingOcrCount}
-            subtitle="analyse ou verification"
-            icon={Sparkles}
+            title="Actions < 30 j"
+            value={upcomingActionsCount}
+            subtitle="actions a preparer"
+            icon={Clock}
+            variant="default"
           />
         </motion.div>
-
-        <motion.div
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.15 }}
-          className="mb-6"
-        >
-            <Alert className="border-primary/20 bg-primary/5">
-              <Sparkles className="h-4 w-4 text-primary" />
-              <AlertTitle>Workflow en 2 etapes</AlertTitle>
-              <AlertDescription>
-              Etape 1: ajoute le contrat et laisse l'OCR remplir les informations du document. Etape 2:
-              juste apres l'enregistrement, la modale enchaine sur l'extraction CGV / CGU pour trouver le
-              site officiel, la bonne page juridique et renseigner les URL.
-              </AlertDescription>
-            </Alert>
-          </motion.div>
 
         <motion.div
           initial={{ opacity: 0, y: 10 }}
@@ -237,26 +325,40 @@ export default function Contracts() {
           transition={{ delay: 0.2 }}
           className="mb-6 flex flex-col gap-4 rounded-xl border border-border bg-card p-4 shadow-card lg:flex-row lg:items-center lg:justify-between"
         >
-          <div className="relative flex-1 lg:max-w-md">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              placeholder="Rechercher un contrat, un outil ou une note..."
-              value={searchQuery}
-              onChange={(event) => setSearchQuery(event.target.value)}
-              className="pl-10"
-            />
+          <div className="flex flex-1 flex-col gap-4 xl:flex-row xl:items-center">
+            <div className="relative flex-1 xl:max-w-md">
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                placeholder="Rechercher un contrat, un outil ou une note..."
+                value={searchQuery}
+                onChange={(event) => setSearchQuery(event.target.value)}
+                className="pl-10"
+              />
+            </div>
+
+            <div className="w-full xl:w-[220px]">
+              <Select value={teamFilter} onValueChange={setTeamFilter} disabled={isTeamsLoading}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Toutes les equipes" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={ALL_TEAMS_FILTER_VALUE}>Toutes les equipes</SelectItem>
+                  {teams.map((team) => (
+                    <SelectItem key={team.id} value={team.id}>
+                      {team.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
           </div>
 
           <div className="flex flex-wrap gap-2">
             {[
               { value: "all" as const, label: "Tous", count: contracts.length },
-              { value: "expiring" as const, label: "Echeances", count: expiringSoonCount },
-              { value: "ocr" as const, label: "OCR", count: pendingOcrCount },
-              {
-                value: "terms" as const,
-                label: "CGV / CGU",
-                count: contracts.filter((contract) => isTermsPending(contract.terms_status)).length,
-              },
+              { value: "expiring90" as const, label: "Echeance < 90 j", count: expiringSoonCount },
+              { value: "tacit" as const, label: "Tacite", count: tacitRenewalCount },
+              { value: "nonTacit" as const, label: "Non tacite", count: nonTacitRenewalCount },
             ].map((item) => (
               <button
                 key={item.value}
@@ -316,7 +418,8 @@ export default function Contracts() {
             {filteredContracts.map((contract, index) => {
               const timelineDays = getDaysUntil(contract.notice_deadline ?? contract.end_date);
               const isLate = timelineDays !== null && timelineDays < 0;
-              const isSoon = timelineDays !== null && timelineDays >= 0 && timelineDays <= 60;
+              const isSoon = timelineDays !== null && timelineDays >= 0 && timelineDays <= 90;
+              const team = contract.team_id ? teamsById.get(contract.team_id) : undefined;
 
               return (
                 <motion.div
@@ -343,12 +446,14 @@ export default function Contracts() {
                             <Badge className={getContractStatusBadgeClass(contract.status)}>
                               {getContractStatusLabel(contract.status)}
                             </Badge>
-                            <Badge className={getOcrStatusBadgeClass(contract.ocr_status)}>
-                              OCR: {getOcrStatusLabel(contract.ocr_status)}
-                            </Badge>
                             <Badge className={getTermsStatusBadgeClass(contract.terms_status)}>
                               CGV: {getTermsStatusLabel(contract.terms_status)}
                             </Badge>
+                            {team && (
+                              <Badge className="border-0 bg-muted text-foreground">
+                                Equipe: {team.name}
+                              </Badge>
+                            )}
                           </div>
 
                           <p className="mt-2 text-sm text-muted-foreground">
@@ -370,21 +475,27 @@ export default function Contracts() {
                           <Button
                             variant="outline"
                             size="sm"
-                            onClick={() => runContractOcr(contract.id)}
-                            disabled={!contract.file_path}
-                          >
-                            <Sparkles className="h-4 w-4" />
-                            Lancer OCR
-                          </Button>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => runContractTermsScan(contract.id)}
+                            onClick={() => launchTermsScan(contract, { openModal: true, silent: true })}
                             disabled={contract.terms_status === "reviewing"}
                           >
                             <Search className="h-4 w-4" />
                             {contract.terms_status === "reviewing" ? "Recherche CGV en cours" : "Extraire CGV / CGU"}
                           </Button>
+                          {contract.renewal_type === "tacit" && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => void handleGenerateEmail(contract)}
+                              disabled={activeEmailGenerationContractId === contract.id}
+                            >
+                              {activeEmailGenerationContractId === contract.id
+                                ? <Loader2 className="h-4 w-4 animate-spin" />
+                                : <Mail className="h-4 w-4" />}
+                              {activeEmailGenerationContractId === contract.id
+                                ? "Generation du mail..."
+                                : "Generer le mail"}
+                            </Button>
+                          )}
                           <Button variant="outline" size="sm" onClick={() => setEditingContract(contract)}>
                             <Pencil className="h-4 w-4" />
                             Modifier
@@ -500,6 +611,8 @@ export default function Contracts() {
           open={createOpen}
           onOpenChange={setCreateOpen}
           mode="create"
+          teams={teams}
+          isTeamsLoading={isTeamsLoading}
           onSubmit={async (input) => {
             const createdContract = await createContract(input);
 
@@ -523,11 +636,14 @@ export default function Contracts() {
           }}
           mode="edit"
           contract={editingContract}
+          teams={teams}
+          isTeamsLoading={isTeamsLoading}
           onPrepareFile={prepareContractFile}
           onRemoveUploadedFile={cleanupUploadedContractFile}
-          onRunTermsScan={runContractTermsScan}
-          autoStartTermsScan={editingContract?.id === autoStartTermsContractId}
-          onAutoStartTermsConsumed={() => setAutoStartTermsContractId(null)}
+          isTermsScanInProgress={
+            !!editingContract &&
+            (editingContract.id === activeTermsScanContractId || editingContract.terms_status === "reviewing")
+          }
           onSubmit={(input) => {
             if (!editingContract) {
               return Promise.resolve(false);
@@ -551,6 +667,58 @@ export default function Contracts() {
           onConfirm={handleDelete}
           isLoading={isDeleting}
         />
+
+        <Dialog
+          open={!!emailDraftContract && !!emailDraft}
+          onOpenChange={(open) => {
+            if (!open) {
+              setEmailDraftContract(null);
+              setEmailDraft(null);
+            }
+          }}
+        >
+          <DialogContent className="sm:max-w-[760px]">
+            <DialogHeader>
+              <DialogTitle className="font-display text-xl">
+                Mail de non-reconduction
+              </DialogTitle>
+              <DialogDescription>
+                Brouillon genere pour {emailDraftContract?.contract_label ?? "ce contrat"}.
+              </DialogDescription>
+            </DialogHeader>
+
+            {emailDraft && (
+              <div className="space-y-4">
+                <div className="rounded-lg border border-border bg-muted/30 p-4">
+                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Objet</p>
+                  <p className="mt-2 text-sm font-medium text-foreground">{emailDraft.subject}</p>
+                </div>
+
+                <div>
+                  <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">Corps du mail</p>
+                  <Textarea
+                    value={emailDraft.body}
+                    readOnly
+                    className="min-h-[320px] resize-none text-sm leading-6"
+                  />
+                </div>
+              </div>
+            )}
+
+            <DialogFooter>
+              <Button variant="outline" onClick={() => void handleCopyDraft()} disabled={!emailDraft}>
+                <Copy className="h-4 w-4" />
+                Copier
+              </Button>
+              <Button asChild disabled={!mailtoHref}>
+                <a href={mailtoHref ?? "#"}>
+                  <Mail className="h-4 w-4" />
+                  Ouvrir dans le client mail
+                </a>
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     </DashboardLayout>
   );

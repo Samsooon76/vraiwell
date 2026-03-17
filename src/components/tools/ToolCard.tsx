@@ -5,6 +5,11 @@ import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { ToolLogo } from "./ToolLogo";
 
+export interface ToolStat {
+  label: string;
+  value: string;
+}
+
 export interface Tool {
   id: string;
   name: string;
@@ -15,6 +20,7 @@ export interface Tool {
   seats?: number;
   usedSeats?: number;
   monthlySpend?: number;
+  stats?: ToolStat[];
 }
 
 interface ToolCardProps {
@@ -44,6 +50,20 @@ const statusConfig = {
 export function ToolCard({ tool, onRequestAccess, onOpenTool }: ToolCardProps) {
   const config = statusConfig[tool.status];
   const StatusIcon = config.icon;
+  const fallbackStats: ToolStat[] = [
+    {
+      label: tool.seats && tool.usedSeats !== undefined ? "Licences" : "Statut",
+      value: tool.seats && tool.usedSeats !== undefined
+        ? `${tool.usedSeats}/${tool.seats}`
+        : "Connecté",
+    },
+    {
+      label: "Coût",
+      value: `€${tool.monthlySpend?.toLocaleString() ?? 0}/mois`,
+    },
+  ];
+
+  const displayStats = (tool.stats?.length ? tool.stats : fallbackStats).slice(0, 2);
 
   return (
     <motion.div
@@ -51,7 +71,7 @@ export function ToolCard({ tool, onRequestAccess, onOpenTool }: ToolCardProps) {
       animate={{ opacity: 1, y: 0 }}
       whileHover={{ y: -2 }}
       transition={{ duration: 0.2 }}
-      className="group relative flex flex-col rounded-xl border border-border bg-card p-5 shadow-card transition-all duration-200 hover:shadow-card-hover hover:border-primary/20"
+      className="group relative flex h-full flex-col rounded-xl border border-border bg-card p-5 shadow-card transition-all duration-200 hover:shadow-card-hover hover:border-primary/20"
     >
       {/* Header */}
       <div className="flex items-start justify-between gap-4">
@@ -77,31 +97,34 @@ export function ToolCard({ tool, onRequestAccess, onOpenTool }: ToolCardProps) {
       </div>
 
       {/* Description */}
-      <p className="mt-3 flex-1 text-sm text-muted-foreground line-clamp-2">
+      <p className="mt-3 min-h-[3.5rem] text-sm text-muted-foreground line-clamp-2">
         {tool.description}
       </p>
 
       {/* Stats (for active tools) */}
-      {tool.status === "active" && tool.seats && (
-        <div className="mt-4 flex items-center gap-4 rounded-lg bg-muted/50 px-3 py-2">
-          <div className="text-center">
-            <p className="text-lg font-semibold text-foreground">
-              {tool.usedSeats}/{tool.seats}
-            </p>
-            <p className="text-xs text-muted-foreground">Licences</p>
-          </div>
-          <div className="h-8 w-px bg-border" />
-          <div className="text-center">
-            <p className="text-lg font-semibold text-foreground">
-              €{tool.monthlySpend?.toLocaleString()}
-            </p>
-            <p className="text-xs text-muted-foreground">/mois</p>
-          </div>
+      {tool.status === "active" && (
+        <div className="mt-4 grid min-h-[88px] grid-cols-2 overflow-hidden rounded-lg bg-muted/50">
+          {displayStats.map((stat, index) => (
+            <div
+              key={`${tool.id}-${stat.label}`}
+              className={cn(
+                "flex flex-col justify-center px-4 py-3",
+                index === 0 && "border-r border-border",
+              )}
+            >
+              <p className="text-3xl font-semibold leading-none text-foreground">
+                {stat.value}
+              </p>
+              <p className="mt-2 text-xs text-muted-foreground">
+                {stat.label}
+              </p>
+            </div>
+          ))}
         </div>
       )}
 
       {/* Actions */}
-      <div className="mt-4 flex gap-2">
+      <div className="mt-auto pt-4 flex gap-2">
         {tool.status === "available" && (
           <Button 
             variant="default" 
